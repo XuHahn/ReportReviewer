@@ -1,0 +1,34 @@
+services:
+  backend:
+    build: ./backend
+    container_name: emc-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      - DB_PATH=/app/data/review.db
+    volumes:
+      - emc_data:/app/data
+      - emc_logs:/app/logs
+
+  frontend:
+    build: ./frontend
+    container_name: emc-frontend
+    restart: unless-stopped
+    ports:
+      - "${EMC_PORT:-8080}:80"
+    depends_on:
+      - backend
+
+  admin:
+    build: ./admin
+    container_name: emc-admin
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_PORT:-8081}:80"
+    depends_on:
+      - backend
+
+volumes:
+  emc_data:
+  emc_logs:

@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 审核管道 — 优化设计方案</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fa;
+    --surface2: #e9ecef;
+    --border: #dee2e6;
+    --text: #212529;
+    --text2: #6c757d;
+    --accent: #4c6ef5;
+    --green: #2f9e44;
+    --amber: #e67700;
+    --red: #e03131;
+    --radius: 10px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+  }
+
+  .header {
+    background: linear-gradient(135deg, #e8ecf1 0%, #dce4f0 50%, #e8ecf1 100%);
+    border-bottom: 1px solid var(--border); padding: 48px 24px 40px; text-align: center;
+  }
+  .header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+  .header h1 span { color: var(--accent); }
+  .header .sub { color: var(--text2); margin-top: 8px; font-size: 0.95rem; }
+  .header .meta { display: flex; gap: 24px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+  .header .meta .tag {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 4px 14px; font-size: 0.82rem; color: var(--text2);
+  }
+
+  .nav {
+    position: sticky; top: 0; z-index: 10; background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+    display: flex; gap: 4px; padding: 10px 24px; overflow-x: auto;
+  }
+  .nav a {
+    color: var(--text2); text-decoration: none; font-size: 0.85rem;
+    padding: 6px 14px; border-radius: 6px; white-space: nowrap; transition: .15s;
+  }
+  .nav a:hover { color: var(--text); background: var(--surface2); }
+
+  .main { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  section { margin-bottom: 56px; }
+  section h2 { font-size: 1.35rem; font-weight: 700; margin-bottom: 8px; }
+  section .desc { color: var(--text2); font-size: 0.9rem; margin-bottom: 24px; }
+
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px; margin-bottom: 40px;
+  }
+  .summary-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px;
+  }
+  .summary-card .label { font-size: 0.8rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.04em; }
+  .summary-card .value { font-size: 1.5rem; font-weight: 700; margin-top: 4px; }
+  .summary-card .unit { font-size: 0.8rem; color: var(--text2); }
+
+  .prop {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    margin-bottom: 20px; overflow: hidden;
+  }
+  .prop-header {
+    display: flex; align-items: center; gap: 12px; padding: 18px 20px;
+    cursor: pointer; user-select: none;
+  }
+  .prop-header:hover { background: var(--surface2); }
+  .prop-header .pri {
+    width: 32px; height: 32px; border-radius: 6px; display: flex;
+    align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0;
+  }
+  .pri-p0 { background: rgba(248,113,113,0.15); color: var(--red); }
+  .pri-p1 { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .pri-p2 { background: rgba(108,140,255,0.15); color: var(--accent); }
+  .prop-header h3 { font-size: 1rem; font-weight: 600; flex: 1; }
+  .prop-header .badge {
+    font-size: 0.7rem; padding: 3px 10px; border-radius: 12px; font-weight: 600; border: 1px solid;
+  }
+  .badge-s { border-color: var(--green); color: var(--green); }
+  .badge-m { border-color: var(--amber); color: var(--amber); }
+  .badge-l { border-color: var(--red); color: var(--red); }
+  .prop-body { padding: 0 20px 20px; display: none; }
+  .prop.open .prop-body { display: block; }
+  .prop.open .prop-header { border-bottom: 1px solid var(--border); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+  .box {
+    background: var(--surface2); border-radius: 8px; padding: 16px; border: 1px solid var(--border);
+  }
+  .box.before { border-left: 3px solid var(--red); }
+  .box.after  { border-left: 3px solid var(--green); }
+  .box h5 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .box.before h5 { color: var(--red); }
+  .box.after  h5 { color: var(--green); }
+  .box pre { font-size: 0.8rem; color: var(--text2); white-space: pre-wrap; margin: 0; line-height: 1.5; }
+  .box code { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-size: 0.82rem; }
+
+  .gain-list { list-style: none; margin: 12px 0 0; }
+  .gain-list li { font-size: 0.85rem; padding: 3px 0; }
+  .gain-list li::before { content: "+ "; color: var(--green); font-weight: 700; }
+
+  .risk-list { list-style: none; margin: 12px 0 0; }
+  .risk-list li { font-size: 0.85rem; padding: 3px 0; }
+  .risk-list li::before { content: "△ "; color: var(--amber); }
+
+  .impl-note { margin-top: 14px; padding: 10px 14px; background: rgba(76,110,245,0.06); border-radius: 6px; font-size: 0.83rem; color: var(--accent); }
+
+  .arch {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 28px 24px; margin: 20px 0; overflow-x: auto;
+  }
+  .arch h4 { font-size: 0.9rem; margin-bottom: 16px; color: var(--text2); }
+  .arch-flow { display: flex; align-items: center; gap: 0; font-size: 0.8rem; flex-wrap: wrap; justify-content: center; }
+  .arch-node {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 16px; text-align: center; white-space: nowrap;
+  }
+  .arch-node.opt { border-color: var(--green); background: rgba(47,158,68,0.08); }
+  .arch-arrow { color: var(--text2); padding: 0 8px; font-size: 1.1rem; }
+  .arch-row { display: flex; align-items: center; gap: 0; margin-bottom: 10px; flex-wrap: wrap; justify-content: center; }
+  .arch-label { font-size: 0.72rem; color: var(--amber); text-align: center; margin: 4px 0 12px; }
+
+  .cmp-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 16px 0; }
+  .cmp-table th, .cmp-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  .cmp-table th { color: var(--text2); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+  .cmp-table td:first-child { font-weight: 600; }
+
+  .footer { text-align: center; padding: 24px; color: var(--text2); font-size: 0.8rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>AI 审核管道 <span>优化设计</span></h1>
+  <p class="sub">EMC 报告审核系统 · 当前架构深度分析 + 7 个优化方案 + 实施路线图</p>
+  <div class="meta">
+    <span class="tag">2026-05-27</span>
+    <span class="tag">DeepSeek API</span>
+    <span class="tag">Two-Stage Review</span>
+    <span class="tag">Prompt Engineering</span>
+  </div>
+</div>
+
+<nav class="nav">
+  <a href="#status">现状诊断</a>
+  <a href="#pipeline">目标架构</a>
+  <a href="#props">7 个优化方案</a>
+  <a href="#iterations" style="color:var(--accent);font-weight:600">审核算法迭代</a>
+  <a href="#iter1">Iter 1</a>
+  <a href="#iter2">Iter 2</a>
+  <a href="#iter3">Iter 3</a>
+  <a href="#new-roadmap">路线图</a>
+</nav>
+
+<div class="main">
+
+<!-- ═══════════════════════════ 现状诊断 ═══════════════════════════ -->
+<section id="status">
+  <h2>现状诊断</h2>
+  <p class="desc">当前 AI 审核管道的 6 个瓶颈点及影响评估。数据基于代码分析 + 审核流程追踪。</p>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="label">平均延迟</div>
+      <div class="value">60&ndash;240<span class="unit">s</span></div>
+      <div style="font-size:0.8rem;color:var(--text2);margin-top:6px">粗扫 180s + 详细 300s 超时上限，实际取决于 token 数</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">单次成本</div>
+      <div class="value">~$0.02&ndash;0.15<span class="unit">/份</span></div>
+      <div style="font-size:0.8rem;color:var(--text2);margin-top:6px">取决于 token 数，无缓存，重复上传重复计费</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Token 利用率</div>
+      <div class="value" style="color:var(--amber)">~55&ndash;70<span class="unit">%</span></div>
+      <div style="font-size:0.8rem;color:var(--text2);margin-top:6px">超限时丢弃 20-40% 内容，关键词误分类不可恢复</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">高亮匹配率</div>
+      <div class="value" style="color:var(--green)">~85&ndash;100<span class="unit">%</span></div>
+      <div style="font-size:0.8rem;color:var(--text2);margin-top:6px">6-pass 后基本覆盖，但 AI 文本准确性决定上限</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">抑制精度</div>
+      <div class="value" style="color:var(--amber)">difflib 0.8<span class="unit"></span></div>
+      <div style="font-size:0.8rem;color:var(--text2);margin-top:6px">字符级匹配，对改写/翻译/中英混合均不鲁棒</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">质量可观测性</div>
+      <div class="value" style="color:var(--red)">几乎为零<span class="unit"></span></div>
+      <div style="font-size:0.8rem;color:var(--text2);margin-top:6px">无结构化质量指标，无法量化 prompt 变更效果</div>
+    </div>
+  </div>
+
+  <h3 style="font-size:1rem;margin-bottom:12px;">当前管道流程 & 瓶颈标注</h3>
+  <div class="arch">
+    <div class="arch-flow">
+      <div class="arch-node">文件上传</div><span class="arch-arrow">→</span>
+      <div class="arch-node">解析<br>mammoth/PyPDF2</div><span class="arch-arrow">→</span>
+      <div class="arch-node">Token 估算<br>len/1.8</div><span class="arch-arrow">→</span>
+      <div class="arch-node">关键词过滤<br>HIGH/MED/LOW</div><span class="arch-arrow">→</span>
+      <div class="arch-node">Stage 1<br>粗扫 180s</div><span class="arch-arrow">→</span>
+      <div class="arch-node">Stage 2<br>详细 300s</div><span class="arch-arrow">→</span>
+      <div class="arch-node">6-pass<br>标红</div><span class="arch-arrow">→</span>
+      <div class="arch-node">difflib<br>抑制</div><span class="arch-arrow">→</span>
+      <div class="arch-node">展示</div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:24px;flex-wrap:wrap;justify-content:center;">
+      <span style="font-size:0.78rem;color:var(--red)">✗ 无缓存 (重复上传=重复计费)</span>
+      <span style="font-size:0.78rem;color:var(--red)">✗ 无检查点 (Stage 2 失败→全部白费)</span>
+      <span style="font-size:0.78rem;color:var(--amber)">△ 丢弃内容不可恢复</span>
+      <span style="font-size:0.78rem;color:var(--amber)">△ 单模型无回退</span>
+      <span style="font-size:0.78rem;color:var(--amber)">△ 无可观测性指标</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 目标架构 ═══════════════════════════ -->
+<section id="pipeline">
+  <h2>优化后目标架构</h2>
+  <p class="desc">在现有管道上叠加 7 个优化点（绿色=新增节点），渐进式演进，每阶段独立交付。</p>
+
+  <div class="arch">
+    <h4>Phase 1+2 目标管道</h4>
+    <div class="arch-row">
+      <div class="arch-node">上传</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt">内容哈希<br>缓存查询</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt" style="border-color:var(--green);background:rgba(47,158,68,0.12);font-weight:600">命中?<br>直接返回</div>
+    </div>
+    <div class="arch-label">↓ 未命中，进入审核管道 ↓</div>
+    <div class="arch-row">
+      <div class="arch-node">解析</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt">语义分块<br>Embedding 排序</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt">Few-shot<br>动态示例</div><span class="arch-arrow">→</span>
+      <div class="arch-node">Stage 1<br>粗扫</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt">置信度<br>评分 0-1</div><span class="arch-arrow">→</span>
+      <div class="arch-node">Stage 2<br>详细</div><span class="arch-arrow">→</span>
+      <div class="arch-node">6-pass</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt">Embedding<br>语义抑制</div><span class="arch-arrow">→</span>
+      <div class="arch-node">结果</div>
+    </div>
+    <div class="arch-label">↓ 低置信度项 (confidence < 0.7) 可选复审 ↓</div>
+    <div class="arch-row">
+      <div class="arch-node opt">校验模型复审<br>(强模型/自一致性)</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt">质量指标<br>写入审计日志</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 7 个方案 ═══════════════════════════ -->
+<section id="props">
+  <h2>7 个优化方案（点击展开详情）</h2>
+  <p class="desc">按优先级 P0→P2 排列。优先级依据：收益/成本比 + 实施风险。每个方案独立可实施。</p>
+
+  <!-- P0-1: Prompt -->
+  <div class="prop open">
+    <div class="prop-header" onclick="this.parentElement.classList.toggle('open')">
+      <div class="pri pri-p0">P0</div>
+      <h3>1. Prompt 工程升级：Few-shot + CoT + 动态模板</h3>
+      <span class="badge badge-s">effort S</span>
+    </div>
+    <div class="prop-body">
+      <div class="grid-2">
+        <div class="box before">
+          <h5>当前方式</h5>
+          <pre>Stage 1 prompt = system + toc + rules + report
+Stage 2 prompt = system + toc + checklist + report
+
+问题:
+· 零示例 — AI 自行揣测"什么算问题"
+· checklist 全量传入，浪费 Stage 2 token
+· original_text 经常改写而非逐字摘录
+· 无领域知识注入 (如具体标准条款全文)
+· "审核标准"仅是 4 条通用描述</pre>
+        </div>
+        <div class="box after">
+          <h5>优化方案</h5>
+          <pre><b>1. Few-shot 示例注入</b>
+  预置 3-5 条人工标注的"标准审核示例"
+  (原文片段 → checklist flag → review_item 完整字段)
+  用报告类型 (辐射/传导/谐波) 检索最相关示例
+  注入到 Stage 2 prompt 中
+
+<b>2. Chain-of-Thought 推理引导</b>
+  Stage 2 增加显式推理步骤:
+  "请按以下步骤逐条审核:
+   步骤1: 在报告中定位原文段落
+   步骤2: 对照适用的EMC标准条款
+   步骤3: 判断是否构成不合规
+   步骤4: 逐字摘录 original_text (不得改写)
+   步骤5: 给出具体修改建议"
+
+<b>3. 动态模板选择</b>
+  按 report_category (辐射RE/传导CE/谐波/闪烁)
+  选择不同的审核 checklist 和标准条款引用</pre>
+        </div>
+      </div>
+      <ul class="gain-list">
+        <li>original_text 逐字摘录率预计提升 20-40% (减少 AI 改写)</li>
+        <li>Stage 2 漏检率降低 (few-shot 示范了"什么值得报")</li>
+        <li>几乎零延迟增加 (仅多 ~500-2000 prompt tokens)</li>
+        <li>可渐进上线: 先加 CoT 引导 → 验证效果 → 再补 few-shot → 再动态化</li>
+      </ul>
+      <div class="impl-note">
+        <b>实施建议:</b> 从 5 条手工标注的 few-shot 示例开始，存入 <code>prompts.py</code>。在 Stage 2 prompt 中 conditional 注入。预计 <b>1-2 天</b>，零额外依赖。
+      </div>
+    </div>
+  </div>
+
+  <!-- P0-2: Cache -->
+  <div class="prop">
+    <div class="prop-header" onclick="this.parentElement.classList.toggle('open')">
+      <div class="pri pri-p0">P0</div>
+      <h3>2. 审核结果缓存：内容哈希 + 增量复审</h3>
+      <span class="badge badge-s">effort S</span>
+    </div>
+    <div class="prop-body">
+      <div class="grid-2">
+        <div class="box before">
+          <h5>当前方式</h5>
+          <pre>每次上传完整调用 Stage 1 + Stage 2
+同一文件重复上传 → 重新审核 + 重新计费
+版本迭代 (V1→V2) → 全文重新审核
+无任何去重或复用机制</pre>
+        </div>
+        <div class="box after">
+          <h5>优化方案</h5>
+          <pre><b>1. 内容哈希缓存</b>
+  reports 表加 content_hash 列
+  SHA256(plain_text) → 查询是否已有相同内容
+  命中 AND 规则/标准未变更 → 直接复用 review_items
+  仅重新执行标红 (highlight 依赖 HTML 结构)
+
+<b>2. 增量复审</b> (版本对比场景)
+  V1 → V2: Python difflib 段落级 diff
+  仅将新增/修改段落送入 AI 审核
+  未变更段落的 review_items 直接继承
+
+<b>3. 缓存失效策略</b>
+  规则/标准变更 → 相关缓存标记失效
+  prompt_version 作为缓存键的一部分</pre>
+        </div>
+      </div>
+      <ul class="gain-list">
+        <li>重复上传延迟从 60-240s 降至 ~1s (直接返回)</li>
+        <li>版本复审 API 成本降低 60-90% (仅审变更部分)</li>
+        <li>实现简单: reports 表加 2 列 + save_report 前加 1 个 if</li>
+      </ul>
+      <ul class="risk-list">
+        <li>规则/标准变更时需失效相关缓存 → 维护 version 标记</li>
+        <li>增量 diff 段落边界需处理 → difflib.SequenceMatcher.get_matching_blocks</li>
+        <li>缓存可能掩盖 prompt 升级效果 → 加 prompt_version 到缓存键</li>
+      </ul>
+      <div class="impl-note">
+        <b>实施建议:</b> 先加 <code>content_hash TEXT</code> + <code>cached_from_report_id TEXT</code>，在 save_report 前检查。Phase 1 只做完全匹配缓存。预计 <b>1-2 天</b>。
+      </div>
+    </div>
+  </div>
+
+  <!-- P1-1: Semantic Chunking -->
+  <div class="prop">
+    <div class="prop-header" onclick="this.parentElement.classList.toggle('open')">
+      <div class="pri pri-p1">P1</div>
+      <h3>3. Token 优化：语义分块替代关键词过滤</h3>
+      <span class="badge badge-m">effort M</span>
+    </div>
+    <div class="prop-body">
+      <table class="cmp-table">
+        <tr><th>维度</th><th>当前 (关键词匹配)</th><th>优化 (Embedding 语义)</th></tr>
+        <tr>
+          <td>分类方式</td>
+          <td>if keyword in heading.lower(): return priority</td>
+          <td>cosine_similarity(section_embedding, "EMC合规审核要点")</td>
+        </tr>
+        <tr>
+          <td>英文报告</td>
+          <td style="color:var(--red)">中文关键词完全不匹配，所有章节 fallback 到 MEDIUM</td>
+          <td style="color:var(--green)">多语言 embedding 模型天然对齐，中英文同等精度</td>
+        </tr>
+        <tr>
+          <td>误分类案例</td>
+          <td style="color:var(--red)">"附件A: 补充限值测量数据"→ LOW (含"附件"被直接丢弃)</td>
+          <td style="color:var(--green)">语义理解整体含义 → 正确识别为 HIGH</td>
+        </tr>
+        <tr>
+          <td>超限处理</td>
+          <td>丢弃的章节信息永久丢失</td>
+          <td>Map-Reduce 分治: 每章独立 Stage 1 (可并行)，零信息损失</td>
+        </tr>
+        <tr>
+          <td>依赖</td>
+          <td>零外部依赖</td>
+          <td>sentence-transformers + bge-small-zh (~100MB 本地运行)</td>
+        </tr>
+      </table>
+      <ul class="gain-list">
+        <li>章节保留精度从"关键词碰运气"提升到语义理解，预计召回率 +15-25%</li>
+        <li>Map-Reduce 模式彻底消除信息丢弃</li>
+        <li>bge-small-zh 仅 ~100MB，本地 CPU 推理 < 100ms/章节</li>
+      </ul>
+      <ul class="risk-list">
+        <li>Map-Reduce 增加 Stage 1 调用次数 (但可并行，总延迟 ≈ 单次调用)</li>
+        <li>Embedding 模型对 EMC 领域术语的覆盖度需验证</li>
+      </ul>
+      <div class="impl-note">
+        <b>实施建议:</b> 先用 embedding 排序作为关键词的双保险 (取并集)，积累对照数据后再决定是否替换。预计 <b>3-5 天</b>。
+      </div>
+    </div>
+  </div>
+
+  <!-- P1-2: Embedding Suppression -->
+  <div class="prop">
+    <div class="prop-header" onclick="this.parentElement.classList.toggle('open')">
+      <div class="pri pri-p1">P1</div>
+      <h3>4. 误报抑制升级：Embedding 语义匹配替代 difflib</h3>
+      <span class="badge badge-m">effort M</span>
+    </div>
+    <div class="prop-body">
+      <table class="cmp-table">
+        <tr><th>场景</th><th>difflib 结果</th><th>Embedding 结果</th></tr>
+        <tr>
+          <td>完全一致</td>
+          <td style="color:var(--green)">相似度 1.0 ✓</td>
+          <td style="color:var(--green)">相似度 0.98 ✓</td>
+        </tr>
+        <tr>
+          <td>同义改写</td>
+          <td style="color:var(--red)">"电源线超标" vs "电源线超出限值" → 0.52 ✗</td>
+          <td style="color:var(--green)">同一语义 → 0.91 ✓</td>
+        </tr>
+        <tr>
+          <td>中英混合</td>
+          <td style="color:var(--red)">"RE test 30MHz" vs "辐射发射 30MHz" → 0.31 ✗</td>
+          <td style="color:var(--green)">多语言对齐 → 0.87 ✓</td>
+        </tr>
+        <tr>
+          <td>数值变化</td>
+          <td style="color:var(--amber)">"限值 50 dBμV" vs "限值 48 dBμV" → 0.94 (假阳性!)</td>
+          <td style="color:var(--green)">数值差异影响 embedding → 0.72 (正确区分)</td>
+        </tr>
+        <tr>
+          <td>批量检索</td>
+          <td>O(n×m) 逐对比较，100 条 × 50 items = 5000 次</td>
+          <td>FAISS 向量索引 → O(log n)，毫秒级</td>
+        </tr>
+      </table>
+      <ul class="gain-list">
+        <li>改写/翻译场景抑制准确率预计从 ~60% 提升到 ~90%</li>
+        <li>抑制数据越多效果越好 (嵌入空间自然聚类)</li>
+        <li>与 difflib 可并存: embedding 优先 → difflib 回退</li>
+        <li>批量检索性能 O(n×m) → O(log n)</li>
+      </ul>
+      <div class="impl-note">
+        <b>实施建议:</b> 在 <code>filter_review_items()</code> 中加 embedding 路径，保留 difflib 作回退。用现有 suppression_patterns 数据建 FAISS 索引。预计 <b>3-5 天</b>。
+      </div>
+    </div>
+  </div>
+
+  <!-- P1-3: Confidence -->
+  <div class="prop">
+    <div class="prop-header" onclick="this.parentElement.classList.toggle('open')">
+      <div class="pri pri-p1">P1</div>
+      <h3>5. 置信度评分 + 低置信复审机制</h3>
+      <span class="badge badge-m">effort M</span>
+    </div>
+    <div class="prop-body">
+      <div class="grid-2">
+        <div class="box before">
+          <h5>当前方式</h5>
+          <pre>AI 返回 review_items 无置信度信息
+所有项在前端一视同仁展示
+人工标注是唯一的纠错手段
+无法区分 "AI 确信的错误" vs "AI 猜测的可能问题"</pre>
+        </div>
+        <div class="box after">
+          <h5>优化方案</h5>
+          <pre><b>1. Prompt 内置信度</b>
+  Stage 2 输出增加 confidence 字段 (0.0-1.0):
+  {
+    "confidence": 0.92,
+    "confidence_rationale": "限值30, 实测33.5,
+     明确超标3.5dB, CISPR 25 表5有限值"
+  }
+  利用 AI 的 self-assessment 能力
+
+<b>2. 自一致性投票</b> (Self-Consistency)
+  Stage 2 跑 3 次 (temperature=0.3)
+  3/3 一致 → high | 2/3 → medium | 1/3 → 丢弃
+
+<b>3. 前端差异化展示</b>
+  confidence >= 0.85: 正常展示
+  0.7-0.85: 黄色边框 + "AI 不确定" 标签
+  < 0.7: 折叠 + "需人工确认"</pre>
+        </div>
+      </div>
+      <ul class="gain-list">
+        <li>前端可优先处理高置信错误，降低 reviewer 认知负荷</li>
+        <li>自一致性对 hallucination 有显著抑制作用</li>
+        <li>置信度数据可用于 prompt 迭代效果评估</li>
+      </ul>
+      <ul class="risk-list">
+        <li>自一致性成本 3x，建议仅对 confidence < 0.7 的项触发</li>
+        <li>AI 自评置信度需人工校准 → 积累 200+ 标注后做校准分析</li>
+      </ul>
+      <div class="impl-note">
+        <b>实施建议:</b> 先从 prompt 内置信度开始 (零额外成本)。积累标注数据后做校准分析，再决定是否上自一致性。预计 <b>2-3 天</b>。
+      </div>
+    </div>
+  </div>
+
+  <!-- P2-1: Observability -->
+  <div class="prop">
+    <div class="prop-header" onclick="this.parentElement.classList.toggle('open')">
+      <div class="pri pri-p2">P2</div>
+      <h3>6. 可观测性：审核质量仪表盘 + 标注反馈闭环</h3>
+      <span class="badge badge-s">effort S</span>
+    </div>
+    <div class="prop-body">
+      <div class="grid-2">
+        <div class="box before">
+          <h5>当前方式</h5>
+          <pre>audit_log: action + employee_id + timestamp
+日志: method/path/status/durationMs + reqId
+无任何结构化质量数据
+
+无法回答的基本问题:
+· AI 审核准确率/召回率是多少?
+· 哪些规则最常被人工推翻?
+· Stage 1 遗漏率趋势?
+· 最近一次 prompt 改动是否提升了质量?</pre>
+        </div>
+        <div class="box after">
+          <h5>优化方案</h5>
+          <pre><b>1. 标注反馈数据模型</b>
+  在 audit_log.detail 中结构化记录:
+  {
+    "ai_severity": "error",
+    "human_status": "false_positive",
+    "item_index": 3,
+    "rule_ids": ["rule_xyz"],
+    "prompt_version": "v3"
+  }
+  → 可聚合为质量看板
+
+<b>2. 质量看板</b> (Admin 新增页面)
+  核心指标: AI 准确率 / 召回率 / F1
+  按规则: 各规则被推翻率排行
+  按时间: 30 天趋势 (prompt 迭代效果)
+  按审核员: 标注活跃度 + 一致性
+
+<b>3. Diff 日志</b>
+  logger.info("data_changed", table=..., column=...,
+    old_value=..., new_value=..., reqId=...)</pre>
+        </div>
+      </div>
+      <ul class="gain-list">
+        <li>建立质量基线，量化每次 prompt 迭代的效果</li>
+        <li>"常被推翻的规则"可优先放入 few-shot 示例</li>
+        <li>标注数据积累 → 为未来 fine-tune 提供训练集</li>
+      </ul>
+      <div class="impl-note">
+        <b>实施建议:</b> 先从 Diff 日志开始 (1 天)，再加标注反馈字段 (1 天)，质量看板后续迭代。预计 <b>3-5 天</b>。
+      </div>
+    </div>
+  </div>
+
+  <!-- P2-2: Resilience -->
+  <div class="prop">
+    <div class="prop-header" onclick="this.parentElement.classList.toggle('open')">
+      <div class="pri pri-p2">P2</div>
+      <h3>7. 弹性与容错：检查点 + 模型级联回退</h3>
+      <span class="badge badge-l">effort L</span>
+    </div>
+    <div class="prop-body">
+      <div class="grid-2">
+        <div class="box before">
+          <h5>当前方式</h5>
+          <pre>Stage 1 成功 → Stage 2 超时 → 全部白费
+重试 3 次 (2/4/8s 指数退避)
+只有 deepseek-chat 单一模型
+API 长时间不可用 → 审核完全中断</pre>
+        </div>
+        <div class="box after">
+          <h5>优化方案</h5>
+          <pre><b>1. 检查点/恢复</b>
+  reports 表加 stage1_checklist 列 (JSON)
+  Stage 1 完成后立即落盘
+  Stage 2 失败 → 从检查点恢复，无需重跑 Stage 1
+
+<b>2. 模型级联回退</b>
+  主: deepseek-chat
+  回退1: 其他商业 API (moonshot/通义千问)
+  回退2: 本地 Qwen2.5-7B 量化版
+
+<b>3. 优雅降级</b>
+  Stage 2 不可用时:
+    先展示 Stage 1 checklist
+    标记 "深度审核待完成"
+    后台异步重试</pre>
+        </div>
+      </div>
+      <ul class="gain-list">
+        <li>可用性从单点依赖提升到多层容错</li>
+        <li>检查点避免重复计费</li>
+        <li>优雅降级保证用户体验不中断</li>
+      </ul>
+      <ul class="risk-list">
+        <li>本地模型部署需 GPU (7B 量化可用 CPU 但慢)</li>
+        <li>模型级联增加架构复杂度，需模型路由器</li>
+        <li>不同模型输出格式可能不一致 → 需适配层</li>
+      </ul>
+      <div class="impl-note">
+        <b>实施建议:</b> 先做检查点 (加 stage1_checklist 列，Stage 1 后立即 save，2 天)。模型级联和本地部署作为长期方向。预计 <b>5-10 天</b>。
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ═══════════════════════════ 审核算法迭代升级 · 完整UI流程 ═══════════════════════════ -->
+<section id="iterations">
+  <h2>审核算法迭代升级 · 完整 UI 流程设计</h2>
+
+
+  <!-- 文件格式说明 -->
+  <div class="arch" style="margin-bottom:28px;padding:20px">
+    <h4>支持的文档格式</h4>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:14px">
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:1.4rem">📄</div><div style="font-weight:600;font-size:0.82rem;margin-top:4px">最终检测报告</div>
+        <div style="font-size:0.7rem;color:var(--text2);margin-top:2px">PDF / DOCX</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:1.4rem">📦</div><div style="font-weight:600;font-size:0.82rem;margin-top:4px">全套原始记录</div>
+        <div style="font-size:0.7rem;color:var(--amber);margin-top:2px">ZIP 压缩包</div>
+        <div style="font-size:0.65rem;color:var(--text2)">内含多个 Word (.docx)</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:1.4rem">📋</div><div style="font-weight:600;font-size:0.82rem;margin-top:4px">试验计划/大纲</div>
+        <div style="font-size:0.7rem;color:var(--text2);margin-top:2px">PDF / DOCX</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:1.4rem">📝</div><div style="font-weight:600;font-size:0.82rem;margin-top:4px">委托单</div>
+        <div style="font-size:0.7rem;color:var(--text2);margin-top:2px">PDF / DOCX</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:1.4rem">📖</div><div style="font-weight:600;font-size:0.82rem;margin-top:4px">测试标准</div>
+        <div style="font-size:0.7rem;color:var(--text2);margin-top:2px">PDF / DOCX</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arch" style="margin-bottom:32px">
+    <h4>完整审核流程 (Step 0 → 4)</h4>
+    <div class="arch-flow" style="font-size:0.75rem;flex-wrap:wrap;gap:4px">
+      <div class="arch-node" style="padding:8px 12px"><b>Step 0</b><br>文档上传<br>& ZIP解压</div><span class="arch-arrow">→</span>
+      <div class="arch-node" style="padding:8px 12px"><b>Step 1</b><br>四源一致性<br>信息提取比对</div><span class="arch-arrow">→</span>
+      <div class="arch-node" style="padding:8px 12px"><b>Step 2</b><br>目录 &<br>结论逻辑</div><span class="arch-arrow">→</span>
+      <div class="arch-node" style="padding:8px 12px;border-color:var(--red);background:rgba(224,49,49,0.08)"><b>Step 3</b><br>数据溯源<br>& 计量校验</div><span class="arch-arrow">→</span>
+      <div class="arch-node" style="padding:8px 12px"><b>Step 4</b><br>方法合规<br>判定重算</div><span class="arch-arrow">→</span>
+      <div class="arch-node opt" style="padding:8px 12px"><b>综合结果</b><br>聚合展示</div>
+    </div>
+  </div>
+</section>
+
+<section id="iter1">
+  <h2>界面 1 — 新建送审（文档上传）</h2>
+  <p class="desc">用户分步上传 5 类文档。原始记录支持 ZIP 压缩包（内含各测试项 Word 文档）。报告和计划支持 PDF/DOCX。</p>
+
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px">
+    <div style="padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:#fff">
+      <div><div style="font-weight:700;font-size:1rem">📋 新建送审</div><div style="font-size:0.78rem;color:var(--text2);margin-top:2px">上传检测报告及关联文档，支持分步补充</div></div>
+      <span style="font-size:0.75rem;background:rgba(224,49,49,0.1);color:var(--red);padding:5px 14px;border-radius:14px;font-weight:600">还需上传 3 份文档</span>
+    </div>
+    <div style="padding:20px 24px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:#fff;border-radius:8px;border:1px solid var(--border)">
+        <span style="font-size:1.2rem">✅</span><div style="flex:1"><div style="font-weight:600;font-size:0.85rem">最终检测报告 <span style="color:var(--text2);font-weight:400;font-size:0.72rem">（必传 · 第1份）</span></div><div style="font-size:0.75rem;color:var(--green);margin-top:2px">📄 RE20250601.pdf · 2.3 MB · 已解析 48 页</div></div>
+        <button style="font-size:0.7rem;border:1px solid var(--border);background:#fff;border-radius:4px;padding:4px 10px">更换</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:rgba(230,119,0,0.03);border-radius:8px;border:2px dashed var(--amber)">
+        <span style="font-size:1.2rem">📦</span><div style="flex:1"><div style="font-weight:600;font-size:0.85rem">全套原始记录 <span style="color:var(--amber);font-weight:600;font-size:0.72rem">（必传 · 支持 ZIP）</span></div><div style="font-size:0.75rem;color:var(--text2);margin-top:2px">ZIP 压缩包，内含每个测试项的 Word (.docx)</div><div style="font-size:0.7rem;color:var(--amber);margin-top:2px">💡 上传后系统自动解压并识别</div></div>
+        <button style="font-size:0.75rem;background:var(--amber);color:#fff;border:none;border-radius:6px;padding:7px 18px;font-weight:600">📤 上传 ZIP</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:#fff;border-radius:8px;border:2px dashed var(--border)">
+        <span style="font-size:1.2rem">📋</span><div style="flex:1"><div style="font-weight:600;font-size:0.85rem">试验计划/大纲 <span style="color:var(--text2);font-weight:400;font-size:0.72rem">（必传 · PDF/DOCX）</span></div><div style="font-size:0.75rem;color:var(--text2);margin-top:2px">客户签署的试验计划或测试大纲文档</div></div>
+        <button style="font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 18px;font-weight:600">选择文件</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:#fff;border-radius:8px;border:2px dashed var(--border)">
+        <span style="font-size:1.2rem">📝</span><div style="flex:1"><div style="font-weight:600;font-size:0.85rem">委托单 <span style="color:var(--text2);font-weight:400;font-size:0.72rem">（必传 · PDF/DOCX）</span></div><div style="font-size:0.75rem;color:var(--text2);margin-top:2px">客户填写的检测委托单</div></div>
+        <button style="font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 18px;font-weight:600">选择文件</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:#fff;border-radius:8px;border:2px dashed var(--border)">
+        <span style="font-size:1.2rem">📖</span><div style="flex:1"><div style="font-weight:600;font-size:0.85rem">测试标准 <span style="color:var(--text2);font-weight:400;font-size:0.72rem">（可选 · 可从标准库选择）</span></div><div style="font-size:0.75rem;color:var(--text2);margin-top:2px">上传标准文档，或从系统标准库中选择已录入的标准</div></div>
+        <button style="font-size:0.75rem;border:1px solid var(--accent);color:var(--accent);background:#fff;border-radius:6px;padding:7px 14px;margin-right:6px">📚 从标准库选</button>
+        <button style="font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:7px 18px;font-weight:600">选择文件</button>
+      </div>
+    </div>
+    <div style="padding:14px 24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:#fff">
+      <div style="font-size:0.75rem;color:var(--text2)">文档上传完成前无法开始审核</div>
+      <div style="display:flex;gap:10px"><button style="font-size:0.8rem;padding:8px 20px;border:1px solid var(--border);border-radius:6px;background:#fff">保存草稿</button><button style="font-size:0.8rem;padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-weight:600;opacity:0.5" disabled>开始审核（需先上传全部文档）</button></div>
+    </div>
+  </div>
+</section>
+
+<section id="iter2">
+  <h2>界面 2 — ZIP 原始记录解压预览</h2>
+  <p class="desc">上传 ZIP 后，系统自动解压并展示内含的 Word 文档列表。每个 Word 对应一个测试项的原始记录。</p>
+
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px">
+    <div style="padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:#fff">
+      <div><div style="font-weight:700;font-size:1rem">📦 原始记录解压预览</div><div style="font-size:0.78rem;color:var(--text2);margin-top:2px">已从 ZIP 中识别 10 个 Word 文档</div></div>
+      <span style="font-size:0.8rem;color:var(--green);font-weight:600">✅ 解压成功</span>
+    </div>
+    <div style="padding:14px 24px;background:rgba(76,110,245,0.04);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px">
+      <span style="font-size:1.5rem">📦</span><div style="flex:1"><b style="font-size:0.85rem">原始记录_RE20250601.zip</b><span style="font-size:0.75rem;color:var(--text2);margin-left:8px">8.6 MB · 10 个文件</span></div>
+      <button style="font-size:0.7rem;border:1px solid var(--border);background:#fff;border-radius:4px;padding:3px 10px">更换</button>
+    </div>
+    <div style="padding:16px 24px">
+      <div style="font-size:0.78rem;color:var(--text2);margin-bottom:10px">系统自动识别每个 Word 文档对应的测试项目类型：</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:#fff;border-radius:6px;border:1px solid var(--border)"><span style="font-size:0.9rem">📄</span><span style="flex:1;font-size:0.8rem;font-weight:500">01_辐射发射_RE_30-200MHz.docx</span><span style="font-size:0.7rem;background:rgba(76,110,245,0.1);color:var(--accent);padding:2px 8px;border-radius:10px">辐射发射 (RE)</span><span style="font-size:0.72rem;color:var(--green)">✅</span></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:#fff;border-radius:6px;border:1px solid var(--border)"><span style="font-size:0.9rem">📄</span><span style="flex:1;font-size:0.8rem;font-weight:500">04_传导骚扰_CE_150kHz-30MHz.docx</span><span style="font-size:0.7rem;background:rgba(76,110,245,0.1);color:var(--accent);padding:2px 8px;border-radius:10px">传导骚扰 (CE)</span><span style="font-size:0.72rem;color:var(--green)">✅</span></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:#fff;border-radius:6px;border:1px solid var(--border)"><span style="font-size:0.9rem">📄</span><span style="flex:1;font-size:0.8rem;font-weight:500">06_谐波电流_Harmonics.docx</span><span style="font-size:0.7rem;background:rgba(230,119,0,0.1);color:var(--amber);padding:2px 8px;border-radius:10px">谐波电流</span><span style="font-size:0.72rem;color:var(--amber)">⚠</span></div>
+        <div style="text-align:center;font-size:0.72rem;color:var(--text2);padding:4px">… 还有 7 个文件 …</div>
+      </div>
+    </div>
+    <div style="padding:14px 24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:#fff">
+      <div style="font-size:0.75rem;color:var(--text2)">💡 如有识别错误，可手动调整测试项类型后确认</div>
+      <button style="font-size:0.8rem;padding:8px 24px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-weight:600">确认并继续</button>
+    </div>
+  </div>
+</section>
+
+<section id="iter3">
+  <h2>界面 3 — 文档集就绪 · 开始审核</h2>
+  <p class="desc">全部 5 类文档上传完毕后，系统展示文档总览。用户最后确认后触发 4 步审核管线。</p>
+
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);background:#fff;display:flex;align-items:center;justify-content:space-between">
+      <div><div style="font-weight:700;font-size:1rem">✅ 文档集就绪 — EMC-20250601-001</div><div style="font-size:0.78rem;color:var(--text2);margin-top:2px">5/5 文档已上传 · 共解析 62 页 · 10 份原始记录</div></div>
+      <span style="font-size:0.8rem;background:rgba(47,158,68,0.1);color:var(--green);padding:5px 14px;border-radius:12px;font-weight:600">可开始审核</span>
+    </div>
+    <div style="padding:20px 24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center"><div style="font-size:1.4rem">📄</div><div style="font-weight:600;font-size:0.76rem;margin-top:4px">最终检测报告</div><div style="font-size:0.65rem;color:var(--green)">RE20250601.pdf ✓</div><div style="font-size:0.62rem;color:var(--text2)">2.3 MB · 48 页</div></div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center"><div style="font-size:1.4rem">📦</div><div style="font-weight:600;font-size:0.76rem;margin-top:4px">原始记录</div><div style="font-size:0.65rem;color:var(--green)">ZIP 解压 10 份 ✓</div><div style="font-size:0.62rem;color:var(--text2)">8.6 MB · 10 DOCX</div></div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center"><div style="font-size:1.4rem">📋</div><div style="font-weight:600;font-size:0.76rem;margin-top:4px">试验计划</div><div style="font-size:0.65rem;color:var(--green)">TestPlan_v2.pdf ✓</div><div style="font-size:0.62rem;color:var(--text2)">1.1 MB · 12 页</div></div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center"><div style="font-size:1.4rem">📝</div><div style="font-weight:600;font-size:0.76rem;margin-top:4px">委托单</div><div style="font-size:0.65rem;color:var(--green)">OrderForm.docx ✓</div><div style="font-size:0.62rem;color:var(--text2)">0.3 MB · 4 页</div></div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center"><div style="font-size:1.4rem">📖</div><div style="font-weight:600;font-size:0.76rem;margin-top:4px">测试标准</div><div style="font-size:0.65rem;color:var(--green)">标准库已选 ✓</div><div style="font-size:0.62rem;color:var(--text2)">GB/T 18655-2018</div></div>
+    </div>
+    <div style="padding:16px 24px;border-top:1px solid var(--border);background:#fff;text-align:right">
+      <button style="font-size:0.9rem;padding:10px 24px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-weight:700">🚀 开始审核</button>
+    </div>
+  </div>
+</section>
+
+<section id="iter4">
+  <h2>界面 4 — 审核进度（SSE 实时推送）</h2>
+  <p class="desc">左侧：步骤时间线；右侧：当前步骤的实时输出。每一步完成后自动推进。</p>
+
+  <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;margin-bottom:24px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px">
+      <div style="font-weight:700;font-size:0.85rem;margin-bottom:16px">🔍 审核进度</div>
+      <div style="display:flex;flex-direction:column;gap:0">
+        <div style="display:flex;gap:10px;padding:10px 0"><div style="display:flex;flex-direction:column;align-items:center"><div style="width:22px;height:22px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.65rem">✓</div><div style="width:2px;flex:1;background:var(--green);margin:2px 0"></div></div><div><div style="font-weight:600;font-size:0.78rem;color:var(--green)">Step 1 完成</div><div style="font-size:0.68rem;color:var(--text2)">提取 23 个字段 · 12s</div></div></div>
+        <div style="display:flex;gap:10px;padding:10px 0"><div style="display:flex;flex-direction:column;align-items:center"><div style="width:22px;height:22px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.65rem">✓</div><div style="width:2px;flex:1;background:var(--green);margin:2px 0"></div></div><div><div style="font-weight:600;font-size:0.78rem;color:var(--green)">Step 2 完成</div><div style="font-size:0.68rem;color:var(--text2)">目录验证通过 · 5s</div></div></div>
+        <div style="display:flex;gap:10px;padding:10px 0"><div style="display:flex;flex-direction:column;align-items:center"><div style="width:22px;height:22px;border-radius:50%;background:var(--amber);display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.65rem">●</div><div style="width:2px;flex:1;background:var(--surface2);margin:2px 0"></div></div><div><div style="font-weight:600;font-size:0.78rem;color:var(--amber)">Step 3 进行中</div><div style="font-size:0.68rem;color:var(--text2)">提取测试数据… 25s</div></div></div>
+        <div style="display:flex;gap:10px;padding:10px 0"><div style="display:flex;flex-direction:column;align-items:center"><div style="width:22px;height:22px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:0.65rem">4</div></div><div><div style="font-weight:600;font-size:0.78rem;color:var(--text2)">Step 4 等待中</div><div style="font-size:0.68rem;color:var(--text2)">方法合规审核</div></div></div>
+      </div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px">
+      <div style="font-weight:700;font-size:0.85rem;margin-bottom:12px">📊 Step 3 实时输出</div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:14px;font-size:0.73rem;font-family:monospace;max-height:330px;overflow-y:auto;line-height:1.8">
+        <div style="color:var(--text2)">[15:32:01] 开始解析原始记录表格数据...</div>
+        <div style="color:var(--text2)">[15:32:03] RE_30-200MHz.docx → 12 行数据</div>
+        <div style="color:var(--text2)">[15:32:04] RE_200-400MHz.docx → 8 行数据</div>
+        <div style="color:var(--text2)">[15:32:05] CE_150kHz-30MHz.docx → 15 行数据</div>
+        <div style="color:var(--text2)">[15:32:07] 解析仪器校准信息... 5 台仪器</div>
+        <div style="color:var(--text2)">[15:32:08] EMI接收机 EMC-001: 2024-06-01~2025-06-01</div>
+        <div style="color:var(--amber)">[15:32:09] ⚠ ANT-023: 校准已过期!</div>
+        <div style="color:var(--text2)">[15:32:10] 比对报告数据与原始记录...</div>
+        <div style="color:var(--green)">[15:32:12] 50MHz 数据一致 ✓</div>
+        <div style="color:var(--red)">[15:32:14] 120MHz 差异: 38.7 vs 38.5</div>
+      </div>
+      <div style="margin-top:10px;font-size:0.7rem;color:var(--text2)">⏳ 预计剩余 ~45s...</div>
+    </div>
+  </div>
+</section>
+
+<section id="iter5">
+  <h2>界面 5 — Step 1 结果：四源一致性校验</h2>
+  <p class="desc">四个来源提取的结构化字段交叉比对结果。不一致项红色高亮，列出所有来源的值供人工判断。</p>
+
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px">
+    <div style="padding:16px 24px;border-bottom:1px solid var(--border);background:#fff;display:flex;align-items:center;gap:12px">
+      <span style="font-size:1.2rem">📋</span><div style="flex:1"><b style="font-size:0.95rem">Step 1 · 基础信息一致性校验</b></div>
+      <span style="font-size:0.72rem;background:rgba(224,49,49,0.1);color:var(--red);padding:3px 10px;border-radius:10px;font-weight:600">3 项不一致</span>
+      <span style="font-size:0.72rem;background:rgba(230,119,0,0.1);color:var(--amber);padding:3px 10px;border-radius:10px;font-weight:600">2 待确认</span>
+      <span style="font-size:0.72rem;background:rgba(47,158,68,0.1);color:var(--green);padding:3px 10px;border-radius:10px;font-weight:600">18 一致</span>
+    </div>
+    <div style="padding:16px 24px;overflow-x:auto">
+      <table style="width:100%;font-size:0.76rem;border-collapse:collapse">
+        <tr style="border-bottom:2px solid var(--border);background:var(--surface2)"><th style="text-align:left;padding:8px 10px">字段</th><th style="text-align:left;padding:8px 10px"><span style="background:rgba(76,110,245,0.12);padding:2px 8px;border-radius:4px">📄 报告</span></th><th style="text-align:left;padding:8px 10px"><span style="background:rgba(230,119,0,0.1);padding:2px 8px;border-radius:4px">📋 计划</span></th><th style="text-align:left;padding:8px 10px"><span style="background:rgba(47,158,68,0.1);padding:2px 8px;border-radius:4px">📝 委托单</span></th><th style="text-align:left;padding:8px 10px"><span style="background:rgba(224,49,49,0.08);padding:2px 8px;border-radius:4px">📊 原始记录</span></th><th style="text-align:center;padding:8px 10px;min-width:80px">一致性</th></tr>
+        <tr style="border-bottom:1px solid var(--border);background:#fff"><td style="padding:8px 10px"><b>委托单位</b></td><td style="padding:8px 10px">广州广电计量检测股份有限公司</td><td style="padding:8px 10px;color:var(--amber)">广电计量检测（广州）有限公司</td><td style="padding:8px 10px">广州广电计量检测股份有限公司</td><td style="padding:8px 10px;color:var(--text2)">—</td><td style="padding:8px 10px;text-align:center"><span style="background:rgba(230,119,0,0.12);color:var(--amber);padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:600">⚠ 名称差异</span></td></tr>
+        <tr style="border-bottom:1px solid var(--border);background:#fff"><td style="padding:8px 10px"><b>样品名称</b></td><td style="padding:8px 10px">车载多媒体导航主机</td><td style="padding:8px 10px">车载多媒体导航主机</td><td style="padding:8px 10px">车载多媒体导航主机</td><td style="padding:8px 10px">车载多媒体导航主机</td><td style="padding:8px 10px;text-align:center"><span style="background:rgba(47,158,68,0.1);color:var(--green);padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:600">✓ 一致</span></td></tr>
+        <tr style="border-bottom:1px solid var(--border);background:rgba(224,49,49,0.04)"><td style="padding:8px 10px"><b>测试项目总数</b></td><td style="padding:8px 10px;color:var(--red);font-weight:700">8 项</td><td style="padding:8px 10px;color:var(--red);font-weight:700">10 项</td><td style="padding:8px 10px;color:var(--red);font-weight:700">10 项</td><td style="padding:8px 10px;color:var(--red);font-weight:700">10 项</td><td style="padding:8px 10px;text-align:center"><span style="background:rgba(224,49,49,0.12);color:var(--red);padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:600">✗ 漏项</span></td></tr>
+        <tr style="background:#fff"><td style="padding:8px 10px"><b>委托日期</b></td><td style="padding:8px 10px">2025-01-08</td><td style="padding:8px 10px">2025-01-08</td><td style="padding:8px 10px">2025-01-08</td><td style="padding:8px 10px;color:var(--text2)">—</td><td style="padding:8px 10px;text-align:center"><span style="background:rgba(47,158,68,0.1);color:var(--green);padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:600">✓ 一致</span></td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="iter6-7">
+  <h2>界面 6-7 — Step 2 结论逻辑 + Step 3 计量校验</h2>
+  <p class="desc">左：目录与结论逻辑审查；右：仪器计量有效期时间线校验（关键风控点）。</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);background:#fff;font-weight:600;font-size:0.9rem">界面 6 · Step 2 — 目录 & 结论逻辑</div>
+      <div style="padding:14px 18px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#fff;border-radius:6px;border:1px solid var(--border)"><span style="font-size:0.78rem">章节标题匹配</span><span style="color:var(--green);font-weight:600;font-size:0.75rem">✅ 15/15</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#fff;border-radius:6px;border:1px solid var(--border)"><span style="font-size:0.78rem">页码对应</span><span style="color:var(--green);font-weight:600;font-size:0.75rem">✅ 一致</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(224,49,49,0.04);border-radius:6px;border:1px solid rgba(224,49,49,0.15)"><span style="font-size:0.78rem">封面 vs 计划项目数</span><span style="color:var(--red);font-weight:600;font-size:0.75rem">❌ 8 ≠ 10</span></div>
+        <div style="margin-top:8px;font-size:0.72rem;color:var(--text2)">逻辑规则: 仅当所有分项 Pass→"通过"</div>
+        <div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">
+          <div style="display:flex;justify-content:space-between;padding:4px 10px;background:#fff;border-radius:3px;font-size:0.72rem"><span>辐射发射</span><span style="color:var(--green)">Pass</span></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 10px;background:#fff;border-radius:3px;font-size:0.72rem"><span>传导骚扰</span><span style="color:var(--green)">Pass</span></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 10px;background:#fff;border-radius:3px;font-size:0.72rem"><span>谐波电流</span><span style="color:var(--red)">Fail</span></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 10px;background:#fff;border-radius:3px;font-size:0.72rem"><span>电压闪烁</span><span style="color:var(--amber)">N/A</span></div>
+        </div>
+        <div style="padding:10px 14px;background:rgba(224,49,49,0.06);border-radius:6px;border:1px solid rgba(224,49,49,0.15)"><span style="font-size:0.78rem;font-weight:700;color:var(--red)">❌ 结论矛盾</span><span style="font-size:0.73rem;color:var(--text2);margin-left:8px">总体"通过"但存在 Fail/N/A</span></div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);background:#fff;font-weight:600;font-size:0.9rem">界面 7 · Step 3 — 仪器计量有效期 <span style="font-size:0.68rem;background:var(--red);color:#fff;padding:1px 7px;border-radius:8px;margin-left:6px">1 违规</span></div>
+      <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
+        <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-weight:600;font-size:0.76rem">🟢 EMI 测试接收机 · EMC-001</div>
+          <div style="position:relative;height:18px;margin:6px 0">
+            <div style="position:absolute;left:0;right:0;top:6px;height:4px;background:var(--surface2);border-radius:2px"></div>
+            <div style="position:absolute;left:8%;width:58%;top:6px;height:4px;background:var(--green);border-radius:2px"></div>
+            <div style="position:absolute;left:30%;top:0;width:7px;height:16px;background:var(--accent);border-radius:2px"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:0.6rem;color:var(--text2)"><span>2024-06-01</span><span>2025-06-01</span></div>
+          <div style="font-size:0.65rem;color:var(--green);margin-top:1px">✅ 测试日 01-15 在有效期内</div>
+        </div>
+        <div style="background:rgba(224,49,49,0.03);border:1px solid rgba(224,49,49,0.2);border-radius:8px;padding:10px 12px">
+          <div style="font-weight:600;font-size:0.76rem">🔴 对数周期天线 · ANT-023</div>
+          <div style="position:relative;height:18px;margin:6px 0">
+            <div style="position:absolute;left:0;right:0;top:6px;height:4px;background:var(--surface2);border-radius:2px"></div>
+            <div style="position:absolute;left:0;width:40%;top:6px;height:4px;background:var(--red);border-radius:2px"></div>
+            <div style="position:absolute;left:44%;top:0;width:7px;height:16px;background:var(--red);border-radius:2px;border:2px solid var(--red)"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:0.6rem;color:var(--text2)"><span>2024-03-01</span><span style="color:var(--red);font-weight:600">失效 2025-01-10</span></div>
+          <div style="font-size:0.65rem;color:var(--red);margin-top:1px">❌ 测试日超出有效期 5 天</div>
+        </div>
+        <div style="font-size:0.68rem;color:var(--text2);text-align:center">+ 3 台仪器合规</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="iter8-9">
+  <h2>界面 8-9 — Step 4 方法合规 + 综合聚合结果</h2>
+  <p class="desc">左：5维度方法合规仪表盘 + 判定重算；右：最终综合审核结果聚合视图。</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);background:#fff;font-weight:600;font-size:0.9rem">界面 8 · Step 4 — 方法合规 (RE · CISPR 25)</div>
+      <div style="padding:12px 16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
+          <div style="padding:10px;background:#fff;border-radius:6px;text-align:center;border:1px solid var(--border)"><div style="font-size:1.1rem">🟢</div><div style="font-weight:600;font-size:0.7rem">测试布置</div><div style="font-size:0.63rem;color:var(--green)">合规 ✓</div></div>
+          <div style="padding:10px;background:#fff;border-radius:6px;text-align:center;border:1px solid var(--border)"><div style="font-size:1.1rem">🟢</div><div style="font-weight:600;font-size:0.7rem">工作模式</div><div style="font-size:0.63rem;color:var(--green)">合规 ✓</div></div>
+          <div style="padding:10px;background:#fff;border-radius:6px;text-align:center;border:1px solid var(--border)"><div style="font-size:1.1rem">🟡</div><div style="font-weight:600;font-size:0.7rem">等级/类别</div><div style="font-size:0.63rem;color:var(--amber)">Class C vs B</div></div>
+          <div style="padding:10px;background:#fff;border-radius:6px;text-align:center;border:1px solid var(--border)"><div style="font-size:1.1rem">🟢</div><div style="font-weight:600;font-size:0.7rem">频率覆盖</div><div style="font-size:0.63rem;color:var(--green)">全频段 ✓</div></div>
+          <div style="padding:10px;background:rgba(224,49,49,0.04);border-radius:6px;text-align:center;border:1px solid rgba(224,49,49,0.2);grid-column:1/-1"><div style="font-size:1.1rem">🔴</div><div style="font-weight:600;font-size:0.7rem">限值适用</div><div style="font-size:0.63rem;color:var(--red)">200-400MHz 引用错误条款</div></div>
+        </div>
+        <div style="font-size:0.72rem;font-weight:600;margin-bottom:6px">判定重算 · 30-200MHz (GB/T 18655)</div>
+        <table style="width:100%;font-size:0.66rem;border-collapse:collapse">
+          <tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:3px">频率</th><th style="text-align:center;padding:3px">实测</th><th style="text-align:center;padding:3px">限值</th><th style="text-align:center;padding:3px">余量</th><th style="text-align:center;padding:3px">原始</th><th style="text-align:center;padding:3px">重算</th></tr>
+          <tr style="border-bottom:1px solid var(--border)"><td>50M</td><td style="text-align:center">42.3</td><td style="text-align:center">54</td><td style="text-align:center;color:var(--green)">-11.7</td><td style="text-align:center;color:var(--green)">Pass</td><td style="text-align:center;color:var(--green)">✓</td></tr>
+          <tr style="border-bottom:1px solid var(--border)"><td>100M</td><td style="text-align:center;color:var(--red)">56.8</td><td style="text-align:center">54</td><td style="text-align:center;color:var(--red)">+2.8</td><td style="text-align:center;color:var(--red)">Fail</td><td style="text-align:center;color:var(--red)">✓</td></tr>
+          <tr style="border-bottom:1px solid var(--border)"><td>150M</td><td style="text-align:center">53.2</td><td style="text-align:center">54</td><td style="text-align:center;color:var(--amber)">-0.8</td><td style="text-align:center;color:var(--green)">Pass</td><td style="text-align:center;color:var(--amber);font-weight:600">⚠</td></tr>
+          <tr><td>180M</td><td style="text-align:center">48.9</td><td style="text-align:center">54</td><td style="text-align:center;color:var(--green)">-5.1</td><td style="text-align:center;color:var(--green)">Pass</td><td style="text-align:center;color:var(--green)">✓</td></tr>
+        </table>
+        <div style="margin-top:6px;font-size:0.62rem;color:var(--amber);background:rgba(230,119,0,0.06);padding:4px 8px;border-radius:3px">⚠ 150MHz 余量 0.8dB 在不确定度 ±2dB 内 → Marginal</div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);background:#fff">
+        <div style="display:flex;align-items:center;gap:10px"><span style="font-size:1.1rem">📊</span><div style="flex:1"><b style="font-size:0.9rem">界面 9 · 综合审核结果</b><span style="font-size:0.7rem;color:var(--text2);margin-left:8px">4步完成 · 82s</span></div>
+          <span style="font-size:0.65rem;background:rgba(224,49,49,0.1);color:var(--red);padding:2px 8px;border-radius:8px;font-weight:600">Err 6</span>
+          <span style="font-size:0.65rem;background:rgba(230,119,0,0.1);color:var(--amber);padding:2px 8px;border-radius:8px;font-weight:600">Warn 4</span>
+          <span style="font-size:0.65rem;background:rgba(76,110,245,0.1);color:var(--accent);padding:2px 8px;border-radius:8px;font-weight:600">Info 3</span>
+        </div>
+      </div>
+      <div style="padding:10px 16px;display:flex;flex-direction:column;gap:6px">
+        <div style="background:rgba(224,49,49,0.04);border:1px solid rgba(224,49,49,0.15);border-radius:6px;padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="background:var(--red);color:#fff;padding:1px 6px;border-radius:3px;font-size:0.63rem;font-weight:700">ERROR</span>
+            <span style="font-size:0.65rem;background:rgba(76,110,245,0.1);color:var(--accent);padding:1px 6px;border-radius:6px">Step 3</span>
+            <span style="font-size:0.65rem;color:var(--text2)">📊 原始记录 · 确定性</span>
+          </div>
+          <div style="font-size:0.75rem;font-weight:600">ANT-023 校准有效期过期 5 天</div>
+          <div style="font-size:0.67rem;color:var(--text2);margin-top:1px">测试日期 01-15 超出校准失效日 01-10</div>
+        </div>
+        <div style="background:rgba(224,49,49,0.04);border:1px solid rgba(224,49,49,0.15);border-radius:6px;padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="background:var(--red);color:#fff;padding:1px 6px;border-radius:3px;font-size:0.63rem;font-weight:700">ERROR</span>
+            <span style="font-size:0.65rem;background:rgba(76,110,245,0.1);color:var(--accent);padding:1px 6px;border-radius:6px">Step 1</span>
+            <span style="font-size:0.65rem;color:var(--text2)">📄 报告 vs 📋 计划 · AI</span>
+          </div>
+          <div style="font-size:0.75rem;font-weight:600">测试项目数量不一致: 报告 8 vs 计划 10</div>
+          <div style="font-size:0.67rem;color:var(--text2);margin-top:1px">缺少"电压闪烁""瞬态传导抗扰度"</div>
+        </div>
+        <div style="background:rgba(230,119,0,0.04);border:1px solid rgba(230,119,0,0.15);border-radius:6px;padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="background:var(--amber);color:#fff;padding:1px 6px;border-radius:3px;font-size:0.63rem;font-weight:700">WARNING</span>
+            <span style="font-size:0.65rem;background:rgba(76,110,245,0.1);color:var(--accent);padding:1px 6px;border-radius:6px">Step 4</span>
+            <span style="font-size:0.65rem;color:var(--text2)">AI + 确定性</span>
+          </div>
+          <div style="font-size:0.75rem;font-weight:600">150MHz 判定 Marginal（余量 0.8dB）</div>
+          <div style="font-size:0.67rem;color:var(--text2);margin-top:1px">在不确定度 ±2dB 内，建议备注</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="new-roadmap">
+  <h2>审核算法迭代 — 实施路线图</h2>
+  <p class="desc">全流程覆盖：每迭代跑通 Step 0-4，逐步加深。总工期 15-21 天。</p>
+
+  <table class="cmp-table">
+    <tr><th>迭代</th><th>工期</th><th>创建文件</th><th>修改文件</th><th>核心收益</th></tr>
+    <tr><td style="font-weight:700;color:var(--accent)">V1 Foundation</td><td>5-7d</td><td style="font-size:0.7rem">document_set.py<br>consistency_checker.py<br>pipeline.py<br>routers/document_set.py<br>zip_extractor.py</td><td style="font-size:0.7rem">models.py, database.py<br>prompts.py, deepseek_client.py<br>main.py, routers/report.py<br>前端 types/api/App</td><td>多文档分步上传<br>ZIP 解压+文件识别<br>四源交叉比对<br>审核管线框架</td></tr>
+    <tr><td style="font-weight:700;color:var(--amber)">V2 Data</td><td>5-7d</td><td style="font-size:0.7rem">structured_extractor.py<br>calibration_validator.py<br>traceability_checker.py</td><td style="font-size:0.7rem">models.py, database.py<br>pipeline.py, prompts.py<br>parser.py, 前端</td><td>DOCX表格结构化提取<br>计量有效期确定性校验<br>数据溯源数值/语义比对</td></tr>
+    <tr><td style="font-weight:700;color:var(--green)">V3 Method</td><td>5-7d</td><td style="font-size:0.7rem">method_compliance.py<br>judgment_recalculator.py<br>standard_resolver.py</td><td style="font-size:0.7rem">models.py, database.py<br>pipeline.py, prompts.py<br>exporter.py, 前端</td><td>5维方法合规检查<br>判定确定性重算<br>标准条款感知审核</td></tr>
+  </table>
+
+  <div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+    <div style="background:rgba(76,110,245,0.06);border:1px solid rgba(76,110,245,0.2);border-radius:var(--radius);padding:14px"><h4 style="font-size:0.82rem;color:var(--accent);margin-bottom:6px">V1 验收</h4><ul style="font-size:0.72rem;list-style:none;line-height:1.7"><li>✓ 5类文档分步上传</li><li>✓ ZIP解压识别 ≥95%</li><li>✓ 字段提取正确率 ≥80%</li><li>✓ SSE实时进度推送</li><li>✓ 61测试零回归</li></ul></div>
+    <div style="background:rgba(230,119,0,0.06);border:1px solid rgba(230,119,0,0.2);border-radius:var(--radius);padding:14px"><h4 style="font-size:0.82rem;color:var(--amber);margin-bottom:6px">V2 验收</h4><ul style="font-size:0.72rem;list-style:none;line-height:1.7"><li>✓ DOCX表格提取 ≥90%</li><li>✓ 校准校验100%确定性</li><li>✓ 数值溯源容差可控</li><li>✓ 过期仪器标记CRITICAL</li><li>✓ 确定性逻辑单元测试</li></ul></div>
+    <div style="background:rgba(47,158,68,0.06);border:1px solid rgba(47,158,68,0.2);border-radius:var(--radius);padding:14px"><h4 style="font-size:0.82rem;color:var(--green);margin-bottom:6px">V3 验收</h4><ul style="font-size:0.72rem;list-style:none;line-height:1.7"><li>✓ 5维度逐一检查</li><li>✓ 判定重算与限值一致</li><li>✓ 不确定度边缘处理</li><li>✓ 标准数据可查询</li><li>✓ 导出含方法合规章节</li></ul></div>
+  </div>
+
+  <div style="margin-top:14px;padding:14px;background:rgba(47,158,68,0.06);border:1px solid rgba(47,158,68,0.2);border-radius:var(--radius);font-size:0.82rem">
+    <strong style="color:var(--green)">总工期：15-21 天</strong> · V1（多文档+ZIP）和 V2（计量风控）是关键增量 · 每迭代独立交付。
+  </div>
+</section>
+
+</div>
+
+<div class="footer">
+  EMC 报告审核系统 · AI 审核管道优化设计 + 审核算法迭代升级 · 2026-06-01
+</div>
+
+</body>
+</html>
