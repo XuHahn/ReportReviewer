@@ -1,91 +1,124 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working with this repository.
 
 ## Project overview
 
-EMC检测报告智能审核系统 — an intelligent report review system for EMC testing labs. Users upload test reports (Word/PDF), the system calls the DeepSeek API to perform compliance review using a two-stage approach (coarse scan → detailed review), and displays errors with red highlighting directly on the original report content. Supports human annotation, project groups for team collaboration, and iterative re-upload with AI-powered diff comparison.
+**EMC报告智能审核系统 v2** — 四源一致性核查平台。上传 4 份关联文档（委托单、试验计划、原始记录、检测报告），自动提取结构化数据，交叉验证一致性，生成审核报告。
+
+| v1（已废弃） | v2（当前） |
+|------|------|
+| 单文件上传 + 2-stage AI 审核 | 4 文档上传 + 交叉验证管线 |
+| DeepSeek 粗扫→详细审核 | 确定性代码提取 + AI 语义提取 + 交叉比对 |
+| ReportUploader.tsx | DocumentSetUploader.tsx |
+| ReviewItem 标注 | PipelineValidationIssue 标注 |
 
 ## Project structure
 
 ```
 ReportReviewer/
-├── start.sh                         # 一键启动（backend + frontend + admin）
-├── deploy.sh / deploy-remote.sh     # 部署脚本
-├── docker-compose.yml
+├── start.sh / deploy.sh / docker-compose.yml
+├── design/                              # UX + 实现规格文档
 ├── backend/
-│   ├── main.py                      # FastAPI 入口, 4 routers
-│   ├── config.py                    # 环境变量
-│   ├── models.py                    # Pydantic 模型
-│   ├── database.py                  # SQLite + 迁移 + CRUD
-│   ├── auth.py                      # JWT (Authorization header only)
-│   ├── rate_limit.py                # 线程安全限流
+│   ├── main.py                          # FastAPI, 5 routers
+│   ├── models.py                        # Pydantic 模型
+│   ├── database.py                      # SQLite WAL + 迁移
+│   ├── auth.py / rate_limit.py
 │   ├── services/
-│   │   ├── deepseek_client.py
-│   │   ├── prompts.py
-│   │   ├── streaming_parser.py
-│   │   ├── parser.py
-│   │   ├── exporter.py
-│   │   └── suppression_filter.py
+│   │   ├── deepseek_client.py           # _call_api, _parse_json
+│   │   ├── prompts.py                   # TEST_PLAN_PROMPT, REPORT_PROMPT
+│   │   ├── order_form_extractor.py      # 委托单 · 100% 代码
+│   │   ├── test_plan_extractor.py       # 试验计划 · 100% AI
+│   │   ├── report_extractor.py          # 检测报告 · AI + 代码校验
+│   │   ├── raw_records_*.py             # 原始记录 · 5 模块
+│   │   ├── document_set.py / pipeline.py / cross_validator.py / exceptions.py
+│   │   └── parser.py / exporter.py
 │   ├── routers/
-│   │   ├── report.py                # 上传/审核/历史/导出/标注/timeline
-│   │   ├── auth.py                  # 登录/用户管理(含姓名)
-│   │   ├── admin.py                 # 管理设置
-│   │   └── groups.py                # 项目组 CRUD (NEW)
-│   ├── tests/
-│   │   ├── conftest.py                 # 测试基础设施（temp DB + 日志 + 用户夹具）
-│   │   ├── utils.py                    # 断言辅助（assert_api_db, assert_log_chain, normalize）
-│   │   ├── pytest.ini                  # asyncio_mode = auto
-│   │   ├── test_crud_reports.py        # 10 tests: 读取/标注/删除/恢复
-│   │   ├── test_crud_users.py          # 8 tests: 用户 CRUD
-│   │   ├── test_crud_rules.py          # 5 tests: 规则 CRUD
-│   │   ├── test_crud_groups.py         # 7 tests: 项目组 CRUD + 成员管理
-│   │   ├── test_crud_standards.py      # 5 tests: 标准 CRUD
-│   │   ├── test_crud_tags.py           # 5 tests: 标签 CRUD
-│   │   ├── test_crud_settings.py       # 3 tests: 系统设置读写
-│   │   ├── test_concurrent.py          # 5 tests: 并发标注/角色变更/令牌过期
-│   │   └── test_permissions.py         # 14 tests: viewer/reviewer/admin/未认证 权限边界
-│   └── utils/
-│       ├── highlighter.py
-│       ├── logger.py                   # structlog JSONL（LOG_DIR 支持环境变量覆盖）
-│       └── constants.py
-├── frontend/                        # 主界面 port 5173
-│   ├── vite.config.ts               # Vite + /api proxy
-│   ├── index.html
+│   │   ├── report.py / auth.py / admin.py / groups.py / document_set.py
+│   ├── utils/ (pdf_utils.py, logger.py, constants.py)
+│   └── tests/ (242 tests, 10 modules)
+├── frontend/ (port 5173, 7 tabs)
 │   └── src/
-│       ├── App.tsx                  # 6 tabs (上传审核|配置|标准库|项目组|仪表盘|报告)
-│       ├── api.ts                   # axios + blob export + 403 handle
-│       ├── types.ts
-│       ├── index.css                # 暗色模式/响应式/打印/无障碍
+│       ├── App.tsx (含「四源校验」Tab)
+│       ├── api.ts / types.ts
 │       └── components/
-│           ├── ReportUploader.tsx    # 先选文件→开始审核→流式进度
-│           ├── ReportReviewer.tsx    # 双栏审核+标注+导出+操作记录
-│           ├── ReportHistory.tsx     # 版本胶囊 Root/V2/V3, 对比/删除
-│           ├── ProjectGroups.tsx     # 项目组网格卡片+成员管理 (NEW)
-│           ├── UserManagement.tsx    # 工号+姓名+角色
-│           ├── StatsDashboard.tsx    # 骨架屏+刷新
-│           ├── BatchReviewer.tsx
-│           ├── ReportComparison.tsx
-│           ├── RulesManager.tsx
-│           ├── StandardsBrowser.tsx
-│           ├── LoginPage.tsx
-│           └── ErrorBoundary.tsx     # (NEW)
-└── admin/                           # 后台管理 port 5174 (独立SPA)
-    ├── vite.config.ts
+│           ├── DocumentSetUploader.tsx   # ★ 四源校验主组件
+│           ├── ReportHistory.tsx / ReportReviewer.tsx / ReportComparison.tsx
+│           ├── RulesManager.tsx / StandardsBrowser.tsx / ProjectGroups.tsx
+│           ├── StatsDashboard.tsx / LoginPage.tsx / ErrorBoundary.tsx
+└── admin/ (port 5174, 8 pages)
     └── src/
-        ├── App.tsx                  # 侧边栏+5页面
-        ├── api.ts / types.ts
-        └── components/              # Dashboard, AllReports, UserManager, etc.
+        ├── App.tsx / Sidebar.tsx
+        └── components/
+            ├── DocumentSetManager.tsx    # ★ 文档集管理
+            ├── ValidationIssueManager.tsx # ★ 校验结果管理
+            ├── Dashboard.tsx / AllReports.tsx / UserManager.tsx
+            ├── AuditLogs.tsx / ProjectGroupManager.tsx / SystemSettings.tsx / LoginPage.tsx
 ```
 
 ## Architecture
 
-- **Backend**: Python FastAPI port 8000. SQLite WAL mode. 100MB upload limit.
-- **Frontend**: React 18 + Vite port 5173. 6 tabs. All tab content stays mounted (`display:none`), state preserved.
-- **Admin**: Separate React app port 5174. Sidebar navigation. 5 pages.
-- **Database tables**: `reports`, `audit_log`, `review_rules`, `emc_standards`, `users` (with `name`), `system_settings`, `suppression_patterns`, `project_groups`, `project_group_members`, `review_items_fts` (FTS5), `tags`
-- **Auth**: JWT HS256, token via Authorization header only. Login case-insensitive. Roles: admin/reviewer/viewer.
-- **Tests**: 61 test cases across 9 modules. Three-way consistency pattern: API response ↔ database truth + reqId log tracing. Uses `httpx.ASGITransport` for direct ASGI testing. Temp SQLite DB per session, `LOG_ENV=prod` for JSONL log verification. See `backend/tests/conftest.py` for fixture architecture.
+- **Backend**: Python FastAPI port 8000. SQLite WAL. 100MB upload limit.
+- **Frontend**: React 18 + Vite port 5173. 7 tabs (display:none preserve state).
+- **Admin**: React 18 + Vite port 5174. 8 pages with sidebar.
+- **Auth**: JWT HS256. Authorization header. Roles: admin/reviewer/viewer.
+- **DB tables**: reports, audit_log, review_rules, emc_standards, users, system_settings, suppression_patterns, project_groups, project_group_members, tags, document_sets, set_documents, extracted_metadata, pipeline_validation_issues, review_items_fts
+
+### 4-Document extraction strategy
+
+| Document | Format | Method | Key file |
+|------|------|------|------|
+| 委托单 | .xls | 100% deterministic | order_form_extractor.py |
+| 试验计划 | PDF/DOCX | 100% AI | test_plan_extractor.py |
+| 原始记录 | PDF(ZIP) | 95% code + 5% AI | raw_records_*.py |
+| 检测报告 | PDF | AI + code validation | report_extractor.py |
+
+### Pipeline flow
+
+```
+Upload 4 docs → Extract → Human review → Lock
+  → cross_validator.py (24 checks, 3 tiers)
+  → pipeline.py (orchestrate + save PipelineValidationIssues)
+  → Results display + annotation
+  → Export report
+```
+
+### Cross-validation checks (24 total)
+
+| # | Check | Tier | Category |
+|---|-------|------|----------|
+| 0 | 测试项覆盖 (计划 vs 记录 + name fuzzy match) | P0 | coverage |
+| 1 | TOC 三方覆盖 (计划+目录+记录) | P0 | toc |
+| 2 | 原始记录结论扫描 | P0 | conclusion |
+| 3 | 报告结论 vs 记录结论 | P0 | conclusion |
+| 4 | 仪器校准有效期 | P0 | calibration |
+| 5 | 仪器清单交叉比对 (报告 vs 记录, 去重后) | P0 | instrument |
+| 6 | 基本信息比对 (标准编号) | P0 | basic_info |
+| 7 | 测试日期跨度 | P0 | date |
+| 8 | 额定电压一致性 | P1 | basic_info |
+| 9 | 测试模式一致性 | P1 | method |
+| 10 | 数据行数对比 (仅发射类, 跳过抗扰类) | P1 | data |
+| 11 | 方法合规检查 | P1 | method |
+| 12 | TOC 完整性 (目录 vs 结果) | P1 | toc |
+| 13 | 多数投票 (4文档字段比对, 过滤 / - 占位符) | P0 | basic_info |
+| 14 | 格式规则校验 (regex) | P0 | format |
+| 15 | 物理范围校验 | P1 | range |
+| 16 | 余量公式 + 超标检测 | P0 | logic |
+| 17 | 总体结论 vs 单项结果 | P0 | conclusion |
+| 18 | 签发日期逻辑 | P1 | date |
+| 19 | 封面信息完整性 | P1 | format |
+| 20 | LLM 深度语义审核 | P0 | llm |
+| 21 | 供应商名称一致性 (过滤 / 占位符) | P0 | basic_info |
+| 22 | 样品数量一致性 | P0 | basic_info |
+| 23 | 测试计划编号一致性 (plan无编号→INFO) | P0 | basic_info |
+
+### Key design decisions for validation
+
+- **"/" handling**: Values like `/`, `-`, `—`, `N/A` are treated as "not provided" and excluded from multi-document comparisons (majority vote, supplier name check).
+- **Coverage name matching**: When raw record test item codes don't match plan codes (e.g. "短时中断试验" vs "EQ/IC04"), a fuzzy name tokenizer (`_fuzzy_match_name`) attempts token-based matching; if found, severity is reduced to INFO instead of WARNING.
+- **Data comparison skips immunity data**: The data-row comparison (`_data_comparison`) only compares rows with frequency values (emission-type: EQ/MC, EQ/MR). Immunity-type rows (EQ/IC, EQ/IR) have no frequency field and are skipped to avoid false "unmatched frequency point" warnings.
+- **Instrument deduplication**: Both report and raw records instruments are deduplicated by `(manufacturer, model, serial_no)` before comparison. The raw `instruments` list preserves the full table, while `deduplicated_instruments` has unique physical instruments.
+- **Plan w/o is_executed**: If all test plan items have empty `is_executed`, all items are treated as required (common for customer-provided template plans).
 
 ## Commands
 
@@ -93,56 +126,80 @@ ReportReviewer/
 # Backend
 cd backend && uvicorn main:app --reload --port 8000
 
-# Frontend main
-cd frontend && npm run dev          # http://localhost:5173
+# Frontend
+cd frontend && npm run dev          # :5173
+cd admin && npm run dev             # :5174
 
-# Frontend admin
-cd admin && npm run dev             # http://localhost:5174
+# Tests (242 passed, 1 unrelated OCR failure)
+cd backend && pytest tests/ -v
 
-# Type-check
+# Type check
 npx -p typescript tsc -p frontend/tsconfig.json --noEmit
 npx -p typescript tsc -p admin/tsconfig.json --noEmit
-
-# Tests (backend)
-cd backend
-pip install -r tests/requirements-test.txt
-pytest tests/ -v                    # 61 tests, ~2s
-pytest tests/ -v --tb=short         # short traceback on failure
-pytest tests/test_crud_reports.py   # single module
-pytest tests/ -k "test_create"      # keyword filter
 ```
 
-## API endpoints (all under /api)
+## Logging conventions
 
-| Method | Path | Auth | Description |
-|------|------|------|------|
-| GET | /health | None | Health check |
-| POST | /auth/login | None | Login (case-insensitive) |
-| GET | /auth/me | JWT | Current user |
-| GET/POST | /users | admin | List/create users (with name) |
-| PUT | /users/{id}/role | admin | Update role |
-| PUT | /users/{id}/name | admin | Update name |
-| GET/PUT | /admin/settings | admin | System settings |
-| GET | /admin/stats | admin | Dashboard stats |
-| POST | /reports/upload | reviewer+ | Blocking upload |
-| POST | /reports/upload/stream | reviewer+ | SSE streaming upload |
-| POST | /reports/upload/batch | reviewer+ | Batch upload (max 10) |
-| GET | /reports/history | Any | History (keyword/result/date/tag filter) |
-| GET | /reports/search | Any | FTS5 search |
-| GET | /reports/{id} | Any | Report detail |
-| PATCH | /reports/{id}/items/{n}/annotation | Any | Annotate (409 conflict) |
-| GET | /reports/{id}/check-updates | Any | Poll updates |
-| GET | /reports/{id}/timeline | Any | Audit trail (with names) |
-| DELETE | /reports/{id} | uploader/admin | Soft-delete (?cascade=true) |
-| POST | /reports/{id}/restore | admin | Restore |
-| GET | /reports/{id}/export/pdf | Any | Export PDF (blob) |
-| GET | /reports/{id}/export/word | Any | Export Word (blob) |
-| GET | /reports/export/batch | Any | Batch Excel (blob) |
-| GET | /reports/stats | Any | Stats |
-| GET/POST | /rules, /rules/{id} | reviewer+ | Rules CRUD |
-| PUT/DELETE | /rules/{id} | reviewer+ | Rules CRUD |
-| GET/POST | /standards, /standards/{id} | reviewer+ | Standards CRUD |
-| DELETE | /standards/{id} | reviewer+ | Delete standard |
-| GET/POST | /groups, /groups/{id} | Any/reviewer+ | Project groups CRUD |
-| PUT/DELETE | /groups/{id} | reviewer+ | Project groups CRUD |
-| GET | /logs | Any | Audit log |
+- **Library**: `structlog` with `contextvars` support. See `backend/utils/logger.py`.
+- **Format**: In `dev` mode (`LOG_ENV=dev` or unset), colored console output via `structlog.dev.ConsoleRenderer`. In `prod` mode (`LOG_ENV=prod`), JSONL to stderr and `logs/app.jsonl` (daily rotation, 30-day retention).
+- **Levels**:
+  - `DEBUG` — only in dev mode (verbose structlog internals).
+  - `INFO` — normal operations: request start/end, AI call success, pipeline start/done, CRUD actions.
+  - `WARNING` — retryable failures (API retries, transient errors).
+  - `ERROR` — non-retryable failures, exhausted retries, extraction errors.
+- **Trace ID**: Every HTTP request gets a unique `reqId` (uuid4 hex, 8 chars) via `LoggingMiddleware`. Bound to the structlog context via `structlog.contextvars.bind_contextvars(reqId=...)`. Propagates automatically to background tasks created with `asyncio.create_task`. All log events within that request include `reqId=<value>`.
+- **Required fields for event logs**:
+  - `event` (message key, e.g. `"ai_call"`, `"pipeline_done"`, `"request completed"`).
+  - `reqId` — always present within HTTP request scope.
+  - `stage` — for AI calls: `"coarse"`, `"detailed"`, `"test_plan"`, `"report"`.
+  - `set_id` — for pipeline operations.
+  - `user` — employee_id for audit-relevant actions.
+- **Sanitization**: Sensitive fields (`customer_name`, `device_id`, `phone`, `email`, etc.) are masked via `log_sanitizer.py`. String values over 1000 characters are truncated.
+- **Key event names**:
+  | Event | Context | Level |
+  |------|------|------|
+  | `request completed` | Every HTTP request (middleware) | INFO/WARNING/ERROR |
+  | `ai_call` | Successful DeepSeek API call | INFO |
+  | `API_RETRY` | DeepSeek retry attempt | WARNING |
+  | `API_EXHAUSTED` | All DeepSeek retries failed | ERROR |
+  | `pipeline_start` / `pipeline_done` | Cross-validation lifecycle | INFO |
+  | `extraction_start` / `extraction_done` | Document extraction | INFO |
+  | `JSON_PARSE` | JSON repair attempt | WARNING |
+
+## Key APIs
+
+**DocumentSet (new):**
+POST /api/sets · GET /api/sets · GET /api/sets/{id} · POST /api/sets/{id}/documents
+POST /api/sets/{id}/lock · PUT /api/sets/{id}/status · POST /api/sets/{id}/review
+GET /api/sets/{id}/versions/{type} · GET /api/sets/{id}/diff
+GET /api/sets/{id}/issues · PATCH /api/sets/{id}/issues/{id}/annotation
+
+**Reports (legacy+current):**
+GET /api/reports/history · GET /api/reports/search · GET /api/reports/stats
+GET /api/reports/{id} · PATCH /api/reports/{id}/items/{n}/annotation
+DELETE /api/reports/{id} · GET /api/reports/{id}/export/{pdf,word}
+
+**Rules/Standards/Groups/Auth:** unchanged from v1.
+
+## Key decisions
+
+- DocumentSet groups 4 required + 1 optional documents. File-level versioning via parent_doc_id.
+- Extraction happens at upload time, results cached in extracted_metadata.
+- Lock requires all 4 docs uploaded + extracted + human-verified before cross-validation.
+- No single source of truth — all docs may have errors. Cross-validation flags discrepancies for human judgment.
+- PipelineValidationIssue supports human_status (pending/confirmed/ignored) + human_comment.
+- All DocumentSet operations logged to audit_log.
+
+## agent要求
+### 1. 核心交互原则
+- 主动确认：在制定计划或执行任务时，若遇到任何分歧点或不理解的内容，必须立即向我提问确认，禁止自行假设。
+- 解决问题应考虑通解，而不是仅针对这个bug进行修复。
+- 结束标识：每次回复结束时，必须打印“结束了喵”。
+### 2. Debug 与日志规范
+- 日志驱动：所有 Debug 行为必须结合日志进行分析。
+- 缺失处理：若现有开发日志未覆盖当前排查内容，需将相关需求整理至 design 文件夹内，并主动询问我是否需要编写相关的日志记录代码。
+### 3. 测试用例资源库
+- 正式报告：example/E20260402869601-1正式报告.pdf
+- 原始记录：example/E20260402869601原始记录.zip
+- 委托单：example/E20260402869601委托单.xls
+- 测试计划：example/E20260402869601测试计划.pdf
