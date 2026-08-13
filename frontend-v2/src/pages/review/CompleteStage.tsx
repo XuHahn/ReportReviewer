@@ -8,7 +8,7 @@ import type { DocumentSetOverview, EvidenceGraphSnapshot } from '../../types'
 import { EmptyState, EvidenceRail } from '../../components/common'
 import { countDismissedMachineFindings } from '../../reviewLogic'
 
-export default function CompleteStage({ setId, overview, snapshot, demo }: { setId: string; overview?: DocumentSetOverview; snapshot?: EvidenceGraphSnapshot; demo: boolean }) {
+export default function CompleteStage({ setId, overview, snapshot }: { setId: string; overview?: DocumentSetOverview; snapshot?: EvidenceGraphSnapshot }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState('')
@@ -20,13 +20,13 @@ export default function CompleteStage({ setId, overview, snapshot, demo }: { set
   async function exportFile(format: 'xlsx' | 'pdf' | 'evidence') {
     if (!snapshot) return
     setBusy(format)
-    try { if (!demo) await downloadReviewRunExport(setId, snapshot.run.graph_id, format); else await new Promise(resolve => setTimeout(resolve, 500)); notifications.show({ color: 'green', message: demo ? '演示模式已模拟生成文件' : '导出文件已经开始下载' }) }
+    try { await downloadReviewRunExport(setId, snapshot.run.graph_id, format); notifications.show({ color: 'green', message: '导出文件已经开始下载' }) }
     catch (error) { notifications.show({ color: 'red', message: apiErrorMessage(error) }) }
     finally { setBusy('') }
   }
   async function revise() {
     setBusy('revision')
-    try { if (!demo) await createDocumentSetRevision(setId); await queryClient.invalidateQueries({ queryKey: ['sets', demo] }); await queryClient.invalidateQueries({ queryKey: ['stats', demo] }); navigate(`/tasks/${setId}/intake`) }
+    try { await createDocumentSetRevision(setId); await queryClient.invalidateQueries({ queryKey: ['sets'] }); await queryClient.invalidateQueries({ queryKey: ['stats'] }); navigate(`/tasks/${setId}/intake`) }
     catch (error) { notifications.show({ color: 'red', message: apiErrorMessage(error) }) }
     finally { setBusy('') }
   }

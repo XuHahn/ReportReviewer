@@ -5,7 +5,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import { notifications } from '@mantine/notifications'
 import { createDocumentSet, getSetStats, getStandards, listDocumentSets, apiErrorMessage } from '../api'
 import { useSession } from '../App'
-import { demoSets, demoStats, demoStandards } from '../mockData'
 import { CHECK_CATEGORY_LABELS } from '../types'
 import { EmptyState, LoadingState, PageHeader, formatDate } from '../components/common'
 import { taskStartStage } from '../reviewLogic'
@@ -13,18 +12,17 @@ import { taskStartStage } from '../reviewLogic'
 const chartColors = ['#c84d3f', '#e28a3b', '#d0a43b', '#3e7185', '#1f7c70', '#755f93']
 
 export default function DashboardPage() {
-  const { demo, user } = useSession()
+  const { user } = useSession()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const standardReviewer = user?.role === 'standard_reviewer'
-  const statsQuery = useQuery({ queryKey: ['stats', demo], queryFn: () => demo ? Promise.resolve(demoStats) : getSetStats(), enabled: !standardReviewer, refetchOnMount: 'always', refetchOnWindowFocus: true })
-  const setsQuery = useQuery({ queryKey: ['sets', demo], queryFn: () => demo ? Promise.resolve({ sets: demoSets, total: demoSets.length }) : listDocumentSets(), enabled: !standardReviewer, refetchOnMount: 'always', refetchOnWindowFocus: true })
+  const statsQuery = useQuery({ queryKey: ['stats'], queryFn: getSetStats, enabled: !standardReviewer, refetchOnMount: 'always', refetchOnWindowFocus: true })
+  const setsQuery = useQuery({ queryKey: ['sets'], queryFn: () => listDocumentSets(), enabled: !standardReviewer, refetchOnMount: 'always', refetchOnWindowFocus: true })
   const stats = statsQuery.data
   const sets = setsQuery.data?.sets || []
 
   async function createTask() {
-    if (demo) { notifications.show({ color: 'blue', title: '当前是演示预览', message: '请退出演示并使用真实工号登录后新建审核。' }); return }
-    try { const result = await createDocumentSet(); await queryClient.invalidateQueries({ queryKey: ['sets', demo] }); await queryClient.invalidateQueries({ queryKey: ['stats', demo] }); navigate(`/tasks/${result.set_id}/intake`) }
+    try { const result = await createDocumentSet(); await queryClient.invalidateQueries({ queryKey: ['sets'] }); await queryClient.invalidateQueries({ queryKey: ['stats'] }); navigate(`/tasks/${result.set_id}/intake`) }
     catch (error) { notifications.show({ color: 'red', title: '新建失败', message: apiErrorMessage(error) }) }
   }
 
@@ -33,7 +31,15 @@ export default function DashboardPage() {
   if (statsQuery.isError || setsQuery.isError || !stats) return <div className="page dashboard-page"><PageHeader eyebrow="TODAY · REVIEW CONTROL" title="真实数据暂时无法读取" description="页面不会使用演示数字替代接口失败。" /><EmptyState icon="error" title="审核数据加载失败" description="请检查后端服务后重试；当前页面没有展示任何替代数据。" /></div>
 
   const trendData = (stats.trends || []).map(item => ({ day: item.date.slice(5), count: item.count }))
-  const issueData = (stats.top_categories || []).slice(0, 5).map((item, index) => ({ name: CHECK_CATEGORY_LABELS[item.category] || item.category, value: item.count, color: chartColors[index % chartColors.length] }))
+  const issueCategoryTotals = (stats.top_categories || []).reduce((totals, item) => {
+    const name = CHECK_CATEGORY_LABELS[item.category] || item.category
+    totals.set(name, (totals.get(name) || 0) + item.count)
+    return totals
+  }, new Map<string, number>())
+  const issueData = [...issueCategoryTotals.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([name, value], index) => ({ id: `${name}-${index}`, name, value, color: chartColors[index % chartColors.length] }))
   const draftCount = sets.filter(item => ['draft', 'incomplete', 'revision'].includes(item.status)).length
   const runningCount = sets.filter(item => ['created', 'building', 'running'].includes(item.latest_run_status || '')).length
   const decisionCount = sets.filter(item => Boolean(item.pending_count)).length
@@ -62,8 +68,8 @@ export default function DashboardPage() {
         </article>
         <article className="issue-panel">
           <div className="panel-heading"><div><span>常见问题构成</span><b>{stats.total_issues || 0}</b></div></div>
-          {issueData.length ? <div className="issue-chart"><ResponsiveContainer width="46%" height={180}><PieChart accessibilityLayer><Pie data={issueData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>{issueData.map(item => <Cell key={item.name} fill={item.color} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer>
-            <div className="issue-legend">{issueData.map(item => <div key={item.name}><i style={{ background: item.color }} /><span title={item.name}>{item.name}</span><b>{item.value}</b></div>)}</div>
+          {issueData.length ? <div className="issue-chart"><ResponsiveContainer width="46%" height={180}><PieChart accessibilityLayer><Pie data={issueData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>{issueData.map(item => <Cell key={item.id} fill={item.color} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer>
+            <div className="issue-legend">{issueData.map(item => <div key={item.id}><i style={{ background: item.color }} /><span title={item.name}>{item.name}</span><b>{item.value}</b></div>)}</div>
           </div> : <EmptyState title="暂无问题分类" description="完成机器审核后，这里会按真实 check_id 汇总。" />}
         </article>
       </section>
@@ -80,8 +86,7 @@ export default function DashboardPage() {
 }
 
 function StandardsSummary() {
-  const { demo } = useSession()
-  const query = useQuery({ queryKey: ['standards-summary', demo], queryFn: () => demo ? Promise.resolve(demoStandards) : getStandards() })
+  const query = useQuery({ queryKey: ['standards-summary'], queryFn: () => getStandards() })
   if (query.isLoading) return <LoadingState label="正在读取标准库真实状态…" />
   if (query.isError) return <EmptyState icon="error" title="标准状态读取失败" description="未使用演示数字替代。" />
   const standards = query.data || []

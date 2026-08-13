@@ -14,6 +14,7 @@ from services.evidence_graph_models import (
     RelationOrigin, RelationStatus, RelationType, ReviewFinding,
 )
 from services.evidence_graph_source_locator import locate_execution_verdict
+from services.document_unitizer import locate_layout_quote
 from utils.logger import get_logger
 
 
@@ -240,6 +241,83 @@ def _named_standard_parameter_tokens(name: str, quote: str) -> set[str]:
     return _number_unit_tokens(segment)
 
 
+def _structured_standard_parameter_sets(requirement: dict) -> list[tuple[dict, set[str]]]:
+    """Return each published parameter as an independent comparison value."""
+    result: list[tuple[dict, set[str]]] = []
+    parameters = requirement.get("parameters")
+    for parameter in parameters if isinstance(parameters, list) else []:
+        if not isinstance(parameter, dict):
+            continue
+        raw_text = str(parameter.get("raw_text") or "").strip()
+        if not raw_text:
+            value = str(parameter.get("value") or "").strip()
+            unit = str(parameter.get("unit") or "").strip()
+            raw_text = f"{value} {unit}".strip()
+        tokens = _number_unit_tokens(raw_text)
+        if tokens:
+            result.append((parameter, tokens))
+    return result
+
+
+def _token_units(tokens: set[str]) -> set[str]:
+    return {
+        match.group(1).casefold()
+        for token in tokens
+        if (match := re.search(r"([a-zA-Z%Ωω]+)$", token))
+    }
+
+
+def _select_standard_parameter(
+    report_tokens: set[str],
+    candidates: list[tuple[dict, set[str]]],
+) -> tuple[dict, set[str]] | None:
+    """Select one published parameter without merging unrelated units."""
+    exact = [candidate for candidate in candidates if candidate[1] == report_tokens]
+    if len(exact) == 1:
+        return exact[0]
+    report_units = _token_units(report_tokens)
+    compatible = [
+        candidate for candidate in candidates
+        if report_units and _token_units(candidate[1]) == report_units
+    ]
+    return compatible[0] if len(compatible) == 1 else None
+
+
+def _parameter_evidence_quote(requirement: dict, parameter: dict | None) -> str:
+    """Keep a short, visually contiguous clause around a structured value."""
+    quote = str(
+        requirement.get("evidence_quote")
+        or requirement.get("original_statement") or ""
+    ).strip()
+    raw_text = str((parameter or {}).get("raw_text") or "").strip()
+    if not quote or not raw_text:
+        return quote
+    match = re.search(re.escape(raw_text), quote, re.IGNORECASE)
+    if not match:
+        return quote
+    start = max(
+        quote.rfind(".", 0, match.start()) + 1,
+        quote.rfind(";", 0, match.start()) + 1,
+        match.start() - 48,
+    )
+    if start > 0 and quote[start - 1].isalnum() and quote[start].isalnum():
+        next_space = quote.find(" ", start)
+        if next_space >= 0:
+            start = next_space + 1
+    stops = [
+        index for separator in (".", ";", "\n")
+        if (index := quote.find(separator, match.end())) >= 0
+    ]
+    end = min(
+        min(stops) + 1 if stops else len(quote),
+        match.end() + 48,
+    )
+    if end < len(quote) and quote[end - 1].isalnum() and quote[end].isalnum():
+        next_space = quote.find(" ", end)
+        end = next_space if next_space >= 0 else len(quote)
+    return quote[start:end].strip(" ,;\n")
+
+
 def _locate_parameter_source(unit, name: str, value: str) -> str:
     """Locate a complete parameter row even when Office line breaks differ."""
     direct = _locate(unit.native_text, value)
@@ -364,19 +442,29 @@ def build_standard_parameter_consistency(
             report_tokens = _number_unit_tokens(value)
             if not name_key or not report_tokens:
                 continue
-            matches: list[tuple[dict, dict, set[str]]] = []
+            matches: list[tuple[dict, dict, set[str], dict | None]] = []
             for requirement, release in scoped_requirements:
                 quote = str(
                     requirement.get("evidence_quote")
                     or requirement.get("original_statement") or ""
                 ).strip()
+                if name_key not in _compact_name(quote):
+                    continue
+                structured = _structured_standard_parameter_sets(requirement)
+                if structured:
+                    selected = _select_standard_parameter(report_tokens, structured)
+                    if selected is not None:
+                        parameter_row, standard_tokens = selected
+                        matches.append((
+                            requirement, release, standard_tokens, parameter_row,
+                        ))
+                    continue
                 standard_tokens = _named_standard_parameter_tokens(name, quote)
-                if name_key in _compact_name(quote) and standard_tokens:
-                    matches.append((requirement, release, standard_tokens))
+                if standard_tokens:
+                    matches.append((requirement, release, standard_tokens, None))
             if not matches:
                 continue
             expected += 1
-            standard_tokens = set().union(*(row[2] for row in matches))
             located = None
             if specification_unit is not None:
                 quote = _locate(specification_unit.native_text, value)
@@ -405,9 +493,15 @@ def build_standard_parameter_consistency(
                 )
                 continue
             anchored += 1
-            if report_tokens == standard_tokens:
+            if any(row[2] == report_tokens for row in matches):
                 continue
-            requirement, release, _ = matches[0]
+            distinct_expected = {tuple(sorted(row[2])) for row in matches}
+            # Several same-unit requirements without an exact match are
+            # conditional or ambiguous; they cannot support an automatic error.
+            if len(distinct_expected) != 1:
+                continue
+            standard_tokens = set(next(iter(distinct_expected)))
+            requirement, release, _, standard_parameter = matches[0]
             snapshot = release.get("snapshot") or {}
             requirement_id = str(requirement.get("id") or _id(
                 "stdreq", str(requirement.get("evidence_quote") or ""),
@@ -426,10 +520,8 @@ def build_standard_parameter_consistency(
                 doc_type="test_standard",
                 filename=str(snapshot.get("standard_code") or "测试标准"),
                 page_number=int(requirement.get("page_start") or 0),
-                exact_quote=str(
-                    requirement.get("evidence_quote")
-                    or requirement.get("original_statement") or ""
-                ).strip(),
+                exact_quote=_parameter_evidence_quote(requirement, standard_parameter),
+                content_hash=str(snapshot.get("source_file_sha256") or ""),
                 extraction_method="published_standard_parameter", confidence=1,
                 metadata={
                     "release_id": release.get("id") or "",
@@ -437,22 +529,47 @@ def build_standard_parameter_consistency(
                     "clause_number": requirement.get("clause_number") or "",
                     "role": "expected", "parameter_name": name,
                     "comparison_value": sorted(standard_tokens),
+                    "structured_parameter": standard_parameter or {},
+                    "source_anchor": {
+                        "version": 2, "status": "text_anchored",
+                        "coordinate_space": "", "method": "published_parameter_quote",
+                        "kind": "parameter_clause", "cardinality": "single_region",
+                        "anchor_quote": _parameter_evidence_quote(
+                            requirement, standard_parameter,
+                        ),
+                    },
                 },
             ))
             unit, report_quote = located
+            report_bbox, report_anchor_quote = locate_layout_quote(
+                unit.layout_lines, report_quote, context_terms=(name,),
+            )
             evidence.append(EvidenceRecord(
                 evidence_id=report_evidence_id, graph_id=graph_id,
                 doc_id=str(documents.get("final_report", {}).get("doc_id") or ""),
                 doc_type="final_report",
                 filename=str(documents.get("final_report", {}).get("filename") or ""),
-                page_number=unit.page_number, exact_quote=report_quote,
+                page_number=unit.page_number, bbox=report_bbox, exact_quote=report_quote,
+                content_hash=unit.source_hash,
                 extraction_method="report_specification_parameter", confidence=1,
                 metadata={
                     "unit_id": unit.unit_id, "role": "observed",
                     "parameter_name": name, "comparison_value": value,
+                    "source_anchor": {
+                        "version": 2,
+                        "status": "located" if report_bbox else "text_anchored",
+                        "coordinate_space": "pdf_points" if report_bbox else "",
+                        "method": "report_parameter_layout_line",
+                        "kind": "parameter_value", "cardinality": "single_region",
+                        "anchor_quote": report_anchor_quote or report_quote,
+                        "rectangles": [report_bbox] if report_bbox else [],
+                        "rendered_pdf_hash": unit.rendered_pdf_hash,
+                        "page_width": unit.page_width, "page_height": unit.page_height,
+                        "page_rotation": unit.page_rotation,
+                    },
                 },
             ))
-            suffix = f"{plan_item.item_id}:{name_key}"
+            suffix = f"{plan_item.item_id}:{name_key}:{parameter_index}"
             node_id = _id("claim", graph_id, "standard_parameter", suffix)
             nodes.append(GraphNode(
                 node_id=node_id, graph_id=graph_id, node_type=NodeType.CLAIM,

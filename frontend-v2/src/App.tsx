@@ -2,7 +2,6 @@ import { createContext, lazy, useContext, useEffect, useMemo, useState } from 'r
 import { Navigate, RouterProvider, createBrowserRouter, isRouteErrorResponse, useRouteError } from 'react-router-dom'
 import { notifications } from '@mantine/notifications'
 import { clearStoredToken, createClientTraceId, getCurrentUser, getStoredToken } from './api'
-import { demoUser } from './mockData'
 import type { User } from './types'
 import AppLayout from './components/AppLayout'
 import LoginPage from './pages/LoginPage'
@@ -17,11 +16,10 @@ const OperationsPage = lazy(() => import('./pages/OperationsPage'))
 
 interface AppSession {
   user: User | null
-  demo: boolean
   loading: boolean
   sessionError: string
   retrySession: () => void
-  signIn: (user: User, demo?: boolean) => void
+  signIn: (user: User) => void
   signOut: () => void
 }
 const SessionContext = createContext<AppSession | null>(null)
@@ -71,23 +69,21 @@ const router = createBrowserRouter([
 ])
 
 export default function App() {
-  const queryDemo = new URLSearchParams(window.location.search).get('demo') === '1'
-  const [demo, setDemo] = useState(queryDemo)
-  const [user, setUser] = useState<User | null>(demo ? demoUser : null)
-  const [loading, setLoading] = useState(!demo && Boolean(getStoredToken()))
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(Boolean(getStoredToken()))
   const [sessionError, setSessionError] = useState('')
   const [sessionAttempt, setSessionAttempt] = useState(0)
 
   useEffect(() => {
-    if (demo || !getStoredToken()) { setLoading(false); return }
+    if (!getStoredToken()) { setLoading(false); return }
     setLoading(true); setSessionError('')
     getCurrentUser().then(setUser).catch(() => {
       if (getStoredToken()) setSessionError('审核服务未响应')
     }).finally(() => setLoading(false))
-  }, [demo, sessionAttempt])
+  }, [sessionAttempt])
 
   useEffect(() => {
-    const logout = () => { setUser(null); setDemo(false) }
+    const logout = () => setUser(null)
     const forbidden = () => notifications.show({ color: 'red', title: '权限不足', message: '当前账号不能执行这个操作。' })
     window.addEventListener('auth:logout', logout)
     window.addEventListener('auth:forbidden', forbidden)
@@ -95,15 +91,15 @@ export default function App() {
   }, [])
 
   const session = useMemo<AppSession>(() => ({
-    user, demo, loading, sessionError,
+    user, loading, sessionError,
     retrySession() { setSessionAttempt(value => value + 1) },
-    signIn(nextUser, nextDemo = false) {
-      setUser(nextUser); setDemo(nextDemo); setSessionError('')
+    signIn(nextUser) {
+      setUser(nextUser); setSessionError('')
     },
     signOut() {
-      clearStoredToken(); setDemo(false); setUser(null); setSessionError('')
+      clearStoredToken(); setUser(null); setSessionError('')
     },
-  }), [user, demo, loading, sessionError])
+  }), [user, loading, sessionError])
 
   return <SessionContext.Provider value={session}><RouterProvider router={router} /></SessionContext.Provider>
 }

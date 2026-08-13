@@ -11,16 +11,16 @@ EMC 报告智能审核系统是四文档一致性审核平台：委托单、试�
 ## 关键代码
 
 - `backend/routers/document_set.py`：文档集上传、提取、修订、锁定、审核、导出和指标 API。
-- `backend/services/pipeline.py`：审核编排、运行指标和结果合并。
-- `backend/services/report_driven_validator.py`：报告驱动的主审核算法。
-- `backend/services/cross_validator.py`：过渡期保留的报告内部确定性检查。
-- `backend/services/test_item_identity_resolver.py`：测试项身份 LLM 提议与复核。
-- `backend/services/deepseek_client.py`、`llm_policy.py`：DeepSeek JSON Output 与任务策略。
+- `backend/services/unified_review_pipeline.py`：统一审核编排、运行状态和结果合并。
+- `backend/services/evidence_graph_review_engine.py`：统一证据图审核主引擎。
+- `backend/services/evidence_graph_extraction.py`：原生优先与定向视觉补证。
+- `backend/services/evidence_graph_relationships.py`：测试项身份关系提议与反驳。
+- `backend/services/unified_model_gateway.py`、`llm_policy.py`：模型路由与任务策略。
 - `backend/services/standard_knowledge.py`、`standard_graph.py`：标准分块、条款关系化和人工发布。
-- `frontend/src/components/DocumentSetUploader.tsx`：审核主界面。
-- `frontend/src/components/DocumentReviewModal.tsx`：四文档提取结果核查。
-- `frontend/src/components/StandardsBrowser.tsx`：标准库。
-- `admin/src/components/DocumentSetManager.tsx`、`ValidationIssueManager.tsx`：后台文档集与问题管理。
+- `frontend-v2/src/pages/ReviewWorkspace.tsx`：审核主界面与阶段路由。
+- `frontend-v2/src/pages/review/IntakeStage.tsx`：四文档上传、自动质量门禁与审核范围。
+- `frontend-v2/src/pages/review/FindingsStage.tsx`：证据高亮、问题说明和人工裁决。
+- `frontend-v2/src/pages/StandardsPage.tsx`：标准库知识化、确认与发布。
 
 ## 当前业务边界
 

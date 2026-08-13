@@ -1,6 +1,6 @@
 # 设计与技术文档索引
 
-最后核对：2026-08-11。
+最后核对：2026-08-13。
 
 ## 现行规范
 
@@ -23,21 +23,8 @@
 | [线上数据集语料](online_cases_corpus.md) | 持续维护 | 高置信度数据集来源、标签和限制 |
 | [合入记录](merge-log.md) | 持续维护 | 重要功能、修复和验证命令 |
 
-## UX 预览
-
-预览只用于设计决策，不参与应用构建：
-
-- [四文档核查界面](previews/four-doc-review-ux-options.html)
-- [修订复审流程](previews/rereview-flow-preview.html)
-- [审核结果表格](previews/review-result-table-preview.html)
-- [标准库与知识化](previews/standard-library-knowledge-ux-preview.html)
-- [试验计划核查方案](previews/test-plan-review-ux-options.html)
-- [统一审核工作台 UX 套件（从上传到结果）](previews/ux-suite/index.html)
-- [前端影子版本 V2 设计说明](frontend-v2-shadow-design.md)
-
 ## 维护约定
 
 1. 现行行为以代码和自动化测试为准，计划稿必须标注状态。
 2. 修改审核边界、LLM 策略、数据模型或用户流程时，同步更新本索引、根目录 `README.md` 和 `merge-log.md`。
-3. UX HTML 统一放入 `design/previews/`，不得再次散落到项目根目录。
-4. 调试输出、截图和生成报告放入 `tmp/`，该目录不提交。
+3. 临时 UX 原型、调试输出、截图和生成报告统一放入 `tmp/`，不得提交。

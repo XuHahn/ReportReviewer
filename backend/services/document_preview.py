@@ -25,10 +25,16 @@ from services.document_unitizer import (
     _office_to_pdf,
     _validate_zip,
 )
+from services.evidence_anchor_finalizer import (
+    _parameter_ordinal_row,
+    _semantic_quote_row,
+    _strict_ordered_quote,
+    _structured_metadata_row,
+)
 
 
 _SUPPORTED_DOCUMENT_SUFFIXES = (".pdf", ".docx", ".xlsx", ".xls")
-PREVIEW_RENDERER_VERSION = "evidence-preview-6-summary-labels"
+PREVIEW_RENDERER_VERSION = "evidence-preview-11-strict-ordered-anchors"
 
 _HIGHLIGHT_PALETTE = {
     "error": {"stroke": (0.78, 0.17, 0.14), "fill": (0.96, 0.28, 0.22)},
@@ -51,6 +57,7 @@ _EVIDENCE_ROLE_LABELS = {
     "supporting_reference": "对照依据",
     "corroborating": "佐证内容",
     "conflicting_report_result": "结果冲突",
+    "missing_field": "字段未填写",
 }
 
 _HIGHLIGHT_KIND_LABELS = {
@@ -144,6 +151,9 @@ class EvidencePagePreview:
     focus_applied: bool = False
     anchor_y_positions: tuple[float | None, ...] = ()
     resolved_bboxes: tuple[tuple[float, float, float, float] | None, ...] = ()
+    resolved_rectangles: tuple[
+        tuple[tuple[float, float, float, float], ...], ...
+    ] = ()
     locator_strategies: tuple[str, ...] = ()
     cache_hit: bool = False
     rendered_pdf_hash: str = ""
@@ -220,6 +230,10 @@ def load_evidence_preview_cache(cache_key: str) -> EvidencePagePreview | None:
                 tuple(value) if value is not None else None
                 for value in metadata.get("resolved_bboxes") or ()
             ),
+            resolved_rectangles=tuple(
+                tuple(tuple(rectangle) for rectangle in (value or ()))
+                for value in metadata.get("resolved_rectangles") or ()
+            ),
             locator_strategies=tuple(metadata.get("locator_strategies") or ()),
             cache_hit=True,
             rendered_pdf_hash=str(metadata.get("rendered_pdf_hash") or ""),
@@ -277,6 +291,7 @@ def store_evidence_preview_cache(cache_key: str, preview: EvidencePagePreview) -
         "focus_applied": preview.focus_applied,
         "anchor_y_positions": preview.anchor_y_positions,
         "resolved_bboxes": preview.resolved_bboxes,
+        "resolved_rectangles": preview.resolved_rectangles,
         "locator_strategies": preview.locator_strategies,
         "rendered_pdf_hash": preview.rendered_pdf_hash,
         "page_width": preview.page_width,
@@ -462,10 +477,13 @@ _STRUCTURED_FIELD_LABELS: dict[str, tuple[str, ...]] = {
     "rated_voltage": ("额定电压", "供电电压", "工作电压", "rated voltage"),
     "sample_id": ("样品编号", "样品号", "sample id", "sample no"),
     "test_plan_number": ("试验计划编号", "测试计划编号", "计划编号", "plan no"),
-    "receive_date": ("接收日期", "收样日期", "receive date"),
+    "receive_date": (
+        "接收日期", "收样日期", "receive date", "receive sample date",
+        "sample receive date",
+    ),
     "test_date": ("试验日期", "测试日期", "test date"),
     "test_date_range": ("试验日期", "测试日期", "test date"),
-    "issue_date": ("签发日期", "发布日期", "issue date"),
+    "issue_date": ("签发日期", "发布日期", "issue date", "issued date", "report date"),
 }
 
 
@@ -484,6 +502,26 @@ def _search_value(page: fitz.Page, value: Any) -> list[fitz.Rect]:
         if rectangles:
             return rectangles
     return []
+
+
+def _atomic_token_text(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return "".join(
+        character for character in normalized
+        if character.isalnum() or character in ".,+-±%Ωω"
+    )
+
+
+def _whole_word_value_rectangles(page: fitz.Page, value: Any) -> list[fitz.Rect]:
+    """Reject suffix matches such as locating ``4V`` inside ``14V``."""
+    needle = _atomic_token_text(value)
+    if not needle or len(needle) > 24:
+        return []
+    return [
+        fitz.Rect(*word[:4])
+        for word in page.get_text("words", sort=True)
+        if _atomic_token_text(word[4]) == needle
+    ]
 
 
 def _ordered_row_score(
@@ -610,23 +648,295 @@ def _structured_field_rectangle(
     return [ranked[0][1]]
 
 
+def _structured_missing_field_rectangle(
+    page: fitz.Page,
+    metadata: dict[str, Any],
+) -> list[fitz.Rect]:
+    """Recover one negative-evidence region for historical graph records."""
+    source_anchor = metadata.get("source_anchor")
+    is_missing = (
+        metadata.get("_extraction_method") == "deterministic_missing_field_region"
+        or (
+            isinstance(source_anchor, dict)
+            and source_anchor.get("kind") == "missing_field"
+        )
+    )
+    field_name = str(metadata.get("field_name") or "")
+    labels = _STRUCTURED_FIELD_LABELS.get(field_name, ())
+    if not is_missing or not labels:
+        return []
+    found: list[fitz.Rect] = []
+    for label in labels:
+        for rectangle in page.search_for(label):
+            if not any(existing == rectangle for existing in found):
+                found.append(rectangle)
+    if len(found) != 1:
+        return []
+    label = found[0]
+    center_y = (label.y0 + label.y1) / 2
+    row_tolerance = max(8.0, label.height * 0.8)
+    right_neighbors: list[tuple[fitz.Rect, str]] = []
+    for block in page.get_text("dict", sort=True).get("blocks", []):
+        for line in block.get("lines", []):
+            bbox = line.get("bbox") or []
+            if len(bbox) != 4:
+                continue
+            candidate = fitz.Rect(*bbox)
+            line_text = "".join(
+                str(span.get("text") or "") for span in line.get("spans", [])
+            )
+            if candidate.intersects(label):
+                label_tokens = {
+                    _normalized_search_text(value) for value in labels
+                }
+                if _normalized_search_text(line_text) not in label_tokens:
+                    return []
+            if candidate.x0 <= label.x1 + 2.0:
+                continue
+            if abs((candidate.y0 + candidate.y1) / 2 - center_y) <= row_tolerance:
+                right_neighbors.append((candidate, line_text))
+    occupied_neighbors = [
+        (rectangle, text) for rectangle, text in right_neighbors
+        if not _preview_unfilled_placeholder(text)
+    ]
+    placeholder_neighbors = [
+        (rectangle, text) for rectangle, text in right_neighbors
+        if _preview_unfilled_placeholder(text)
+    ]
+    if occupied_neighbors:
+        return []
+    x1 = page.rect.x1 - max(18.0, page.rect.width * 0.04)
+    if placeholder_neighbors:
+        x1 = min(x1, max(item[0].x1 for item in placeholder_neighbors) + 4.0)
+    if x1 < label.x1 + 12.0:
+        x1 = label.x1
+    return [fitz.Rect(
+        max(page.rect.x0, label.x0 - 2.0),
+        max(page.rect.y0, label.y0 - 2.0),
+        min(page.rect.x1, x1),
+        min(page.rect.y1, label.y1 + 2.0),
+    )]
+
+
+def _preview_unfilled_placeholder(value: str) -> bool:
+    compact = re.sub(r"[\s:：]", "", str(value or "")).casefold()
+    if not compact:
+        return True
+    if re.fullmatch(r"(?:x{3,}|[_—–-]{2,}|\.{3,}|…{2,})", compact):
+        return True
+    return compact in {
+        "tbd", "todo", "待定", "待填写", "待补充", "未填写",
+        "请输入", "请填写", "report报告编号",
+    }
+
+
+def _structured_parameter_rectangle(
+    page: fitz.Page,
+    quote: str,
+    metadata: dict[str, Any],
+) -> list[fitz.Rect]:
+    """Locate a parameter value without accepting a longer numeric token."""
+    parameter_name = str(metadata.get("parameter_name") or "").strip()
+    if not parameter_name:
+        return []
+    values = _whole_word_value_rectangles(page, quote)
+    if len(values) == 1:
+        return values
+    labels = list(page.search_for(parameter_name))
+    if not values or not labels:
+        return []
+    ranked = sorted(
+        (
+            min(abs((value.y0 + value.y1 - label.y0 - label.y1) / 2) for label in labels),
+            value,
+        )
+        for value in values
+    )
+    if len(ranked) > 1 and abs(ranked[1][0] - ranked[0][0]) < 1.0:
+        return []
+    return [ranked[0][1]] if ranked[0][0] <= max(18.0, ranked[0][1].height * 1.5) else []
+
+
+def _page_layout_lines(page: fitz.Page) -> list[dict]:
+    lines: list[dict] = []
+    for block in page.get_text("dict", sort=True).get("blocks", []):
+        for line in block.get("lines", []):
+            bbox = line.get("bbox") or []
+            text = "".join(str(span.get("text") or "") for span in line.get("spans", []))
+            if text.strip() and len(bbox) == 4:
+                lines.append({"text": text, "bbox": list(map(float, bbox))})
+    return lines
+
+
+def _semantic_layout_rectangles(
+    page: fitz.Page,
+    quote: str,
+    metadata: dict[str, Any],
+) -> tuple[list[fitz.Rect], str]:
+    """Backfill historical evidence using the same finalization rules as a run."""
+    layout_lines = _page_layout_lines(page)
+    _bbox, rectangles, method = _structured_metadata_row(layout_lines, metadata)
+    if not rectangles:
+        _bbox, rectangles, method = _semantic_quote_row(layout_lines, quote)
+    if not rectangles:
+        _bbox, rectangles, method = _parameter_ordinal_row(layout_lines, metadata)
+    return [fitz.Rect(*rectangle) for rectangle in rectangles], method
+
+
+def _valid_source_anchor_rectangles(
+    page: fitz.Page,
+    bbox: list[float],
+    source_anchor: dict[str, Any],
+    current_rendered_pdf_hash: str = "",
+) -> list[fitz.Rect]:
+    """Read versioned multi-rectangle anchors while keeping bbox compatibility."""
+    expected_hash = str(source_anchor.get("rendered_pdf_hash") or "")
+    hash_matches = not (
+        expected_hash and current_rendered_pdf_hash
+        and expected_hash != current_rendered_pdf_hash
+    )
+    candidates = source_anchor.get("rectangles")
+    rectangles: list[fitz.Rect] = []
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if not isinstance(candidate, (list, tuple)) or len(candidate) != 4:
+                return []
+            rectangle = fitz.Rect(*map(float, candidate))
+            if rectangle.is_empty or not page.rect.contains(rectangle):
+                return []
+            rectangles.append(rectangle)
+    if rectangles:
+        if hash_matches or _source_anchor_matches_page(page, rectangles, source_anchor):
+            return rectangles
+        return []
+    if len(bbox) != 4:
+        return []
+    rectangle = fitz.Rect(*bbox)
+    if rectangle.is_empty or not page.rect.contains(rectangle):
+        return []
+    rectangles = [rectangle]
+    if hash_matches or _source_anchor_matches_page(page, rectangles, source_anchor):
+        return rectangles
+    return []
+
+
+def _source_anchor_matches_page(
+    page: fitz.Page,
+    rectangles: list[fitz.Rect],
+    source_anchor: dict[str, Any],
+) -> bool:
+    """Validate coordinates across non-deterministic DOCX-to-PDF binaries.
+
+    Repeated conversion can change the PDF byte hash without changing page
+    geometry.  Accept such coordinates only when page dimensions still match
+    and the saved anchor text intersects the saved region.
+    """
+    expected_width = float(source_anchor.get("page_width") or 0)
+    expected_height = float(source_anchor.get("page_height") or 0)
+    if (
+        expected_width <= 0 or expected_height <= 0
+        or abs(page.rect.width - expected_width) > 0.75
+        or abs(page.rect.height - expected_height) > 0.75
+    ):
+        return False
+    anchor_quote = str(source_anchor.get("anchor_quote") or "").strip()
+    if not anchor_quote:
+        return False
+    searched: list[fitz.Rect] = []
+    for candidate in _search_candidates(anchor_quote):
+        searched.extend(page.search_for(candidate))
+    if not searched:
+        searched = _normalized_quote_rectangles(page, anchor_quote)
+    return bool(searched) and any(
+        anchor.intersects(saved)
+        for anchor in searched
+        for saved in rectangles
+    )
+
+
+def _semantic_region_count(rectangles: list[fitz.Rect]) -> int:
+    """Count spatially separate regions represented by text fragments.
+
+    A wrapped sentence may have several line rectangles but still represents
+    one evidence region. Distant header/footer hits or repeated occurrences
+    are separate regions and must not be silently drawn as one proof.
+    """
+    if not rectangles:
+        return 0
+    remaining = [fitz.Rect(rectangle) for rectangle in rectangles]
+    groups: list[list[fitz.Rect]] = []
+
+    def connected(left: fitz.Rect, right: fitz.Rect) -> bool:
+        vertical_overlap = max(
+            0.0, min(left.y1, right.y1) - max(left.y0, right.y0),
+        )
+        min_height = max(1.0, min(left.height, right.height))
+        if vertical_overlap / min_height >= 0.45:
+            horizontal_gap = max(0.0, max(left.x0, right.x0) - min(left.x1, right.x1))
+            return horizontal_gap <= max(18.0, min(left.height, right.height) * 1.5)
+        upper, lower = (left, right) if left.y0 <= right.y0 else (right, left)
+        vertical_gap = max(0.0, lower.y0 - upper.y1)
+        return vertical_gap <= max(8.0, max(left.height, right.height) * 0.80)
+
+    while remaining:
+        group = [remaining.pop(0)]
+        changed = True
+        while changed:
+            changed = False
+            for rectangle in list(remaining):
+                if any(connected(rectangle, member) for member in group):
+                    group.append(rectangle)
+                    remaining.remove(rectangle)
+                    changed = True
+        groups.append(group)
+    return len(groups)
+
+
+def _accept_semantic_rectangles(
+    rectangles: list[fitz.Rect],
+    metadata: dict[str, Any],
+) -> list[fitz.Rect]:
+    source_anchor = metadata.get("source_anchor")
+    cardinality = (
+        str(source_anchor.get("cardinality") or "single_region")
+        if isinstance(source_anchor, dict) else "single_region"
+    )
+    if cardinality == "multiple_regions":
+        return rectangles[:8]
+    return rectangles[:8] if _semantic_region_count(rectangles) == 1 else []
+
+
 def _highlight_rectangles(
     page: fitz.Page,
     quote: str,
     bbox: list[float],
     metadata: dict[str, Any],
 ) -> tuple[list[fitz.Rect], str]:
+    source_anchor = metadata.get("source_anchor")
+    if isinstance(source_anchor, dict) and source_anchor.get("status") == "located":
+        anchored = _valid_source_anchor_rectangles(
+            page, bbox, source_anchor,
+            str(metadata.get("_current_rendered_pdf_hash") or ""),
+        )
+        if anchored:
+            return anchored, "source_anchor_bbox"
+    missing_field = _structured_missing_field_rectangle(page, metadata)
+    if missing_field:
+        return missing_field, "structured_missing_field"
     structured = _structured_row_rectangles(page, metadata)
     if structured:
         return structured, "structured_comparison_row"
     structured_field = _structured_field_rectangle(page, quote, metadata)
     if structured_field:
         return structured_field, "structured_field_row"
-    source_anchor = metadata.get("source_anchor")
-    if isinstance(source_anchor, dict) and source_anchor.get("status") == "located" and len(bbox) == 4:
-        anchored = fitz.Rect(*bbox)
-        if page.rect.contains(anchored) and not anchored.is_empty:
-            return [anchored], "source_anchor_bbox"
+    structured_parameter = _structured_parameter_rectangle(page, quote, metadata)
+    if structured_parameter:
+        return structured_parameter, "structured_parameter_value"
+    semantic_layout, semantic_method = _semantic_layout_rectangles(
+        page, quote, metadata,
+    )
+    if semantic_layout:
+        return semantic_layout, semantic_method
     rectangles: list[fitz.Rect] = []
     quote_candidates = _search_candidates(quote)
     anchor_quote = str(source_anchor.get("anchor_quote") or "") if isinstance(source_anchor, dict) else ""
@@ -638,6 +948,7 @@ def _highlight_rectangles(
         # occurrence. Multiple hits would create a persuasive but arbitrary box.
         if len(candidate) < 3 and len(rectangles) != 1:
             rectangles = []
+        rectangles = _accept_semantic_rectangles(rectangles, metadata)
         if rectangles:
             break
     if rectangles:
@@ -645,7 +956,17 @@ def _highlight_rectangles(
     for candidate in dict.fromkeys(quote_candidates):
         rectangles = _normalized_quote_rectangles(page, candidate)
         if rectangles:
+            rectangles = _accept_semantic_rectangles(rectangles, metadata)
+        if rectangles:
             return rectangles, "normalized_quote"
+    # A strict ordered-line match is the final text fallback.  Exact and
+    # normalized quote strategies retain priority, and disconnected page
+    # regions are rejected inside the shared locator.
+    _strict_bbox, strict_rectangles, strict_method = _strict_ordered_quote(
+        _page_layout_lines(page), quote,
+    )
+    if strict_rectangles:
+        return [fitz.Rect(*rectangle) for rectangle in strict_rectangles], strict_method
     if len(bbox) == 4:
         direct = fitz.Rect(*bbox)
         if page.rect.contains(direct) and not direct.is_empty:
@@ -678,6 +999,7 @@ def render_evidence_page(
     if page_number < 1:
         raise IndexError(page_number)
     pdf_bytes = _source_pdf(file_bytes, filename)
+    rendered_pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
     render_scale = float(os.getenv("UNITIZER_RENDER_SCALE", "2.0"))
     if not 1.0 <= render_scale <= 4.0:
         raise ValueError("UNITIZER_RENDER_SCALE 必须在 1.0 到 4.0 之间")
@@ -695,11 +1017,13 @@ def render_evidence_page(
         rectangles_by_spec: dict[int, list[fitz.Rect]] = {}
         label_rectangles: list[fitz.Rect] = []
         for index, spec in enumerate(specs[:12], start=1):
+            locator_metadata = dict(spec.get("metadata") or {})
+            locator_metadata["_current_rendered_pdf_hash"] = rendered_pdf_hash
             rectangles, strategy = _highlight_rectangles(
                 page,
                 str(spec.get("quote") or ""),
                 list(spec.get("bbox") or []),
-                dict(spec.get("metadata") or {}),
+                locator_metadata,
             )
             if not rectangles:
                 continue
@@ -778,16 +1102,24 @@ def render_evidence_page(
                     max(rect.x1 for rect in rectangles_by_spec[index]),
                     max(rect.y1 for rect in rectangles_by_spec[index]),
                 )
-                if (
-                    rectangles_by_spec.get(index)
-                    and (
-                        len(rectangles_by_spec[index]) == 1
-                        or locator_strategies[index] in {
-                            "structured_comparison_row", "source_anchor_bbox", "bbox",
-                        }
-                    )
+                if rectangles_by_spec.get(index)
+                and (
+                    _semantic_region_count(rectangles_by_spec[index]) == 1
+                    or locator_strategies[index] in {
+                        "semantic_structured_row",
+                        "semantic_parameter_ordinal_row",
+                        "strict_ordered_quote",
+                        "structured_metadata_row",
+                    }
                 )
                 else None
+            )
+            for index in range(min(len(specs), 12))
+        )
+        resolved_rectangles = tuple(
+            tuple(
+                (rect.x0, rect.y0, rect.x1, rect.y1)
+                for rect in rectangles_by_spec.get(index, [])
             )
             for index in range(min(len(specs), 12))
         )
@@ -822,8 +1154,9 @@ def render_evidence_page(
             focus_applied=clip is not None,
             anchor_y_positions=anchor_y_positions,
             resolved_bboxes=resolved_bboxes,
+            resolved_rectangles=resolved_rectangles,
             locator_strategies=tuple(locator_strategies),
-            rendered_pdf_hash=hashlib.sha256(pdf_bytes).hexdigest(),
+            rendered_pdf_hash=rendered_pdf_hash,
             page_width=float(page.rect.width),
             page_height=float(page.rect.height),
         )

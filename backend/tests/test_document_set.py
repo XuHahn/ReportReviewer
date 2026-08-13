@@ -5,13 +5,16 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from types import SimpleNamespace
 
+import fitz
 import pytest
 
 import database
 from services.document_set import DocumentSetService
 from services.evidence_graph_models import EvidenceRecord, GraphRun, GraphScope, ReviewFinding
 from services.evidence_graph_store import EvidenceGraphStore
+from routers.document_set import _evidence_anchor_signature
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -136,6 +139,36 @@ async def test_raw_archive_inventory_recovers_legacy_chinese_filename(reviewer_c
     member = response.json()["members"][0]
     assert member["source_filename"] == mojibake
     assert member["filename"] == expected
+
+
+@pytest.mark.anyio
+async def test_raw_archive_manifest_is_scoped_to_document_version(reviewer_client):
+    sid = database.create_document_set("reviewer1")
+    old_doc_id = database.add_document_to_set(sid, "original_records", "old.zip", 1)
+    old_buffer = io.BytesIO()
+    with zipfile.ZipFile(old_buffer, "w") as archive:
+        archive.writestr("old-record.pdf", b"old")
+    database.store_file_content(old_doc_id, old_buffer.getvalue())
+
+    old_response = await reviewer_client.get(
+        f"/api/sets/{sid}/documents/{old_doc_id}/archive-members",
+    )
+    assert old_response.status_code == 200
+
+    new_doc_id = database.add_document_to_set(
+        sid, "original_records", "new.zip", 1, replace_doc_id=old_doc_id,
+    )
+    new_buffer = io.BytesIO()
+    with zipfile.ZipFile(new_buffer, "w") as archive:
+        archive.writestr("new-record.pdf", b"new")
+    database.store_file_content(new_doc_id, new_buffer.getvalue())
+    new_response = await reviewer_client.get(
+        f"/api/sets/{sid}/documents/{new_doc_id}/archive-members",
+    )
+    assert new_response.status_code == 200
+
+    assert database.get_document_archive_members(old_doc_id)[0]["display_filename"] == "old-record.pdf"
+    assert database.get_document_archive_members(new_doc_id)[0]["display_filename"] == "new-record.pdf"
 
 
 def test_raw_archive_extraction_recovers_legacy_filename_before_structuring(_seeded_db):
@@ -326,6 +359,166 @@ async def test_reviewer_can_preview_highlighted_evidence_page(reviewer_client, m
     )
     assert not_modified.status_code == 304
     assert not_modified.content == b""
+
+
+@pytest.mark.anyio
+async def test_preview_rejects_one_quote_spread_across_distant_regions(reviewer_client):
+    sid = database.create_document_set("reviewer1")
+    doc_id = database.add_document_to_set(sid, "final_report", "report.pdf", 1)
+    database.store_file_content(
+        doc_id,
+        _preview_pdf_lines("Issued Date:", "Company footer", "Address footer"),
+    )
+    graph_id = "graph-preview-disconnected"
+    store = EvidenceGraphStore(database.DB_PATH)
+    store.init_schema()
+    store.create_run(GraphRun(graph_id=graph_id, scope=GraphScope.RUN, set_id=sid))
+    store.add_evidence(EvidenceRecord(
+        graph_id=graph_id, evidence_id="evidence-disconnected", doc_id=doc_id,
+        doc_type="final_report", filename="report.pdf", page_number=1,
+        exact_quote="Issued Date: Company footer Address footer",
+        extraction_method="test", confidence=1,
+        metadata={"source_anchor": {
+            "status": "text_anchored", "cardinality": "single_region",
+        }},
+    ))
+
+    response = await reviewer_client.get(
+        f"/api/sets/{sid}/review-runs/{graph_id}/evidence/evidence-disconnected/preview",
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-evidence-highlight-count"] == "0"
+    assert response.headers["x-evidence-highlight-strategy"] == "none"
+
+
+@pytest.mark.anyio
+async def test_preview_recovers_historical_missing_field_as_one_region(reviewer_client):
+    sid = database.create_document_set("reviewer1")
+    doc_id = database.add_document_to_set(sid, "final_report", "report.pdf", 1)
+    database.store_file_content(
+        doc_id,
+        _preview_pdf_lines("Issued Date:", "Company footer", "Address footer"),
+    )
+    graph_id = "graph-preview-historical-missing"
+    store = EvidenceGraphStore(database.DB_PATH)
+    store.init_schema()
+    store.create_run(GraphRun(graph_id=graph_id, scope=GraphScope.RUN, set_id=sid))
+    store.add_evidence(EvidenceRecord(
+        graph_id=graph_id, evidence_id="evidence-historical-missing", doc_id=doc_id,
+        doc_type="final_report", filename="report.pdf", page_number=1,
+        exact_quote="Issued Date: Company footer Address footer",
+        extraction_method="deterministic_missing_field_region", confidence=1,
+        metadata={"field_name": "issue_date"},
+    ))
+
+    response = await reviewer_client.get(
+        f"/api/sets/{sid}/review-runs/{graph_id}/evidence/evidence-historical-missing/preview",
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-evidence-highlight-count"] == "1"
+    assert response.headers["x-evidence-highlight-strategy"] == "structured_missing_field"
+    persisted = store.get_evidence(graph_id, "evidence-historical-missing")
+    assert persisted is not None
+    assert len(persisted.bbox) == 4
+    assert len(persisted.metadata["source_anchor"]["rectangles"]) == 1
+
+
+@pytest.mark.anyio
+async def test_preview_reuses_verified_coordinates_when_pdf_bytes_change(reviewer_client):
+    sid = database.create_document_set("reviewer1")
+    doc_id = database.add_document_to_set(sid, "final_report", "report.pdf", 1)
+    pdf_bytes = _preview_pdf_lines("Test Plan No.: xxxxxx", "Customer: Example")
+    database.store_file_content(doc_id, pdf_bytes)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+        page = document[0]
+        label = page.search_for("Test Plan No.:")[0]
+        placeholder = page.search_for("xxxxxx")[0]
+        region = fitz.Rect(label)
+        region.include_rect(placeholder)
+        coordinates = [region.x0, region.y0, region.x1, region.y1]
+        page_width, page_height = page.rect.width, page.rect.height
+
+    graph_id = "graph-preview-stable-geometry"
+    store = EvidenceGraphStore(database.DB_PATH)
+    store.init_schema()
+    store.create_run(GraphRun(graph_id=graph_id, scope=GraphScope.RUN, set_id=sid))
+    store.add_evidence(EvidenceRecord(
+        graph_id=graph_id, evidence_id="evidence-stable-geometry", doc_id=doc_id,
+        doc_type="final_report", filename="report.pdf", page_number=1,
+        exact_quote="Test Plan No.:", bbox=coordinates,
+        extraction_method="deterministic_missing_field_region", confidence=1,
+        metadata={"field_name": "test_plan_number", "role": "missing_field", "source_anchor": {
+            "version": 2, "status": "located", "kind": "missing_field",
+            "cardinality": "single_region", "coordinate_space": "pdf_points",
+            "anchor_quote": "Test Plan No.:", "rectangles": [coordinates],
+            "page_width": page_width, "page_height": page_height,
+            "rendered_pdf_hash": "different-docx-conversion-hash",
+        }},
+    ))
+
+    response = await reviewer_client.get(
+        f"/api/sets/{sid}/review-runs/{graph_id}/evidence/evidence-stable-geometry/preview",
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-evidence-highlight-count"] == "1"
+    assert response.headers["x-evidence-highlight-strategy"] == "source_anchor_bbox"
+
+
+@pytest.mark.anyio
+async def test_preview_does_not_locate_short_value_inside_longer_value(reviewer_client):
+    sid = database.create_document_set("reviewer1")
+    doc_id = database.add_document_to_set(sid, "final_report", "report.pdf", 1)
+    database.store_file_content(
+        doc_id,
+        _preview_pdf_lines("Reversed voltage 4V", "Reversed voltage 14V"),
+    )
+    graph_id = "graph-preview-atomic-parameter"
+    store = EvidenceGraphStore(database.DB_PATH)
+    store.init_schema()
+    store.create_run(GraphRun(graph_id=graph_id, scope=GraphScope.RUN, set_id=sid))
+    store.add_evidence(EvidenceRecord(
+        graph_id=graph_id, evidence_id="evidence-atomic", doc_id=doc_id,
+        doc_type="final_report", filename="report.pdf", page_number=1,
+        exact_quote="4V", extraction_method="test", confidence=1,
+        metadata={"parameter_name": "Reversed voltage"},
+    ))
+
+    response = await reviewer_client.get(
+        f"/api/sets/{sid}/review-runs/{graph_id}/evidence/evidence-atomic/preview",
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-evidence-highlight-count"] == "1"
+    assert response.headers["x-evidence-highlight-strategy"] == "structured_parameter_value"
+
+
+def test_preview_anchor_signature_tracks_corrections_but_not_lazy_enrichment():
+    original = SimpleNamespace(exact_quote="4V", bbox=[], metadata={"parameter_name": "Voltage"})
+    corrected_quote = SimpleNamespace(
+        exact_quote="14V", bbox=[], metadata={"parameter_name": "Voltage"},
+    )
+    corrected_bbox = SimpleNamespace(
+        exact_quote="4V", bbox=[10, 20, 30, 40],
+        metadata={"parameter_name": "Voltage", "source_anchor": {
+            "method": "manual_layout_anchor", "status": "located",
+        }},
+    )
+    lazy = SimpleNamespace(
+        exact_quote="4V", bbox=[10, 20, 30, 40], metadata={
+            "parameter_name": "Voltage", "source_anchor": {
+                "method": "preview_exact_quote", "status": "located",
+                "rectangles": [[10, 20, 30, 40]],
+            },
+        },
+    )
+
+    original_signature = _evidence_anchor_signature(original)
+    assert _evidence_anchor_signature(corrected_quote) != original_signature
+    assert _evidence_anchor_signature(corrected_bbox) != original_signature
+    assert _evidence_anchor_signature(lazy) == original_signature
 
 
 @pytest.mark.anyio

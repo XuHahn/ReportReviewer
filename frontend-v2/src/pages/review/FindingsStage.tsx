@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Textarea } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,7 +31,6 @@ import {
 import { useSession } from "../../App";
 import type {
   DocType,
-  DocumentSetOverview,
   EvidenceGraphEvidence,
   EvidenceGraphFinding,
   EvidenceGraphSnapshot,
@@ -295,8 +294,11 @@ function evidenceSourceLocation(evidence: EvidenceGraphEvidence) {
   return `${page}${member ? ` · ${member}` : ""}`;
 }
 
-function evidenceAnchorLabel(evidence: EvidenceGraphEvidence) {
-  return evidence.bbox?.length
+function evidenceAnchorLabel(
+  evidence: EvidenceGraphEvidence,
+  runtimeLocated = false,
+) {
+  return runtimeLocated || evidence.bbox?.length
     ? "已定位高亮"
     : "本页证据尚未定位到高亮区域";
 }
@@ -380,7 +382,7 @@ function EvidenceImageViewport({
   zoom?: number;
   className: string;
   onOpen?: () => void;
-  onLocationChange?: (located: boolean) => void;
+  onLocationChange?: (located: boolean, locatedAnchors: boolean[]) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -415,7 +417,10 @@ function EvidenceImageViewport({
     zoom,
   ]);
   useEffect(() => {
-    onLocationChange?.(located);
+    onLocationChange?.(
+      located,
+      preview.anchorY.map((position) => preview.highlightCount > 0 && position != null),
+    );
   }, [located, onLocationChange]);
   return (
     <div
@@ -469,15 +474,15 @@ function EvidenceComparisonPanel({
   graphId,
   page,
   finding,
-  demo,
   onOpen,
+  onEvidenceLocations,
 }: {
   setId: string;
   graphId: string;
   page: EvidencePageGroup;
   finding: EvidenceGraphFinding;
-  demo: boolean;
   onOpen: (pageKey: string) => void;
+  onEvidenceLocations: (updates: Record<string, boolean>) => void;
 }) {
   const [anchor, setAnchor] = useState(0);
   const [focused, setFocused] = useState(true);
@@ -494,8 +499,7 @@ function EvidenceComparisonPanel({
   const inventoryQuery = useQuery({
     queryKey: ["archive-members", setId, evidence.doc_id],
     queryFn: () => getArchiveMemberInventory(setId, evidence.doc_id),
-    enabled:
-      !demo && evidence.doc_type === "original_records" && memberIndex > 0,
+    enabled: evidence.doc_type === "original_records" && memberIndex > 0,
     staleTime: 5 * 60_000,
   });
   const memberFilename =
@@ -558,24 +562,22 @@ function EvidenceComparisonPanel({
           </div>
         )}
       </header>
-      {demo ? (
-        <button
-          className={`evidence-compare-preview ${focused ? "is-focused" : ""}`}
-          onClick={() => onOpen(page.key)}
-          aria-label={`打开${DOC_LABELS[evidence.doc_type]}${member ? member : ""}${location}大图`}
-        >
-          <MockEvidencePage page={page} kinds={kinds} zoom={100} />
-        </button>
-      ) : (
-        <EvidenceImageViewport
-          className="evidence-compare-preview"
-          url={preview}
-          activeAnchor={anchor}
-          focused={focused}
-          alt={`${DOC_LABELS[evidence.doc_type]}${member ? member : ""}${location}完整页高亮原文`}
-          onOpen={() => onOpen(page.key)}
-        />
-      )}
+      <EvidenceImageViewport
+        className="evidence-compare-preview"
+        url={preview}
+        activeAnchor={anchor}
+        focused={focused}
+        alt={`${DOC_LABELS[evidence.doc_type]}${member ? member : ""}${location}完整页高亮原文`}
+        onOpen={() => onOpen(page.key)}
+        onLocationChange={(located, locatedAnchors) =>
+          onEvidenceLocations(Object.fromEntries(
+            page.records.map((record, index) => [
+              record.evidence_id,
+              locatedAnchors[index] ?? located,
+            ]),
+          ))
+        }
+      />
     </article>
   );
 }
@@ -614,18 +616,14 @@ function CoverageMissingPanel({
 
 export default function FindingsStage({
   setId,
-  overview,
   snapshot,
   loading,
-  demo,
   drawerOpen,
   onDrawerClose,
 }: {
   setId: string;
-  overview?: DocumentSetOverview;
   snapshot?: EvidenceGraphSnapshot;
   loading: boolean;
-  demo: boolean;
   drawerOpen: boolean;
   onDrawerClose: () => void;
 }) {
@@ -641,7 +639,16 @@ export default function FindingsStage({
   const [lightbox, setLightbox] = useState(false);
   const [focusMode, setFocusMode] = useState(true);
   const [currentPreviewLocated, setCurrentPreviewLocated] = useState(false);
-  const previewLocated = demo || currentPreviewLocated;
+  const [evidenceLocationById, setEvidenceLocationById] = useState<Record<string, boolean>>({});
+  const mergeEvidenceLocations = useCallback((updates: Record<string, boolean>) => {
+    setEvidenceLocationById((previous) => {
+      const changed = Object.entries(updates).some(
+        ([evidenceId, located]) => previous[evidenceId] !== located,
+      );
+      return changed ? { ...previous, ...updates } : previous;
+    });
+  }, []);
+  const previewLocated = currentPreviewLocated;
   const [activeAnchor, setActiveAnchor] = useState(0);
   const [viewerWide, setViewerWide] = useState(false);
   const [resolution, setResolution] = useState("");
@@ -653,6 +660,7 @@ export default function FindingsStage({
     snapshot?.decisions || [],
   );
   const dragStart = useRef<{ x: number; width: number } | null>(null);
+  const queueRef = useRef<HTMLElement | null>(null);
   const findings = snapshot?.findings || [];
   const evidenceById = useMemo(
     () =>
@@ -786,11 +794,37 @@ export default function FindingsStage({
     setZoom(100);
     setFocusMode(true);
     setCurrentPreviewLocated(false);
+    setEvidenceLocationById({});
     setActiveAnchor(0);
     setTechnicalOpen(false);
     setResolution(selectedDecision?.resolution_code || "");
     setComment(selectedDecision?.comment || "");
   }, [selected?.finding_id]);
+  useEffect(() => {
+    if (!selectedId) return;
+    requestAnimationFrame(() => {
+      const queue = queueRef.current;
+      const active = queue
+        ? Array.from(
+            queue.querySelectorAll<HTMLElement>(
+              "[data-finding-id]",
+            ),
+          ).find((element) => element.dataset.findingId === selectedId)
+        : undefined;
+      if (!queue || !active) return;
+      const queueRect = queue.getBoundingClientRect();
+      const activeRect = active.getBoundingClientRect();
+      const stickyHeaderHeight =
+        queue.querySelector<HTMLElement>(".queue-filters")?.offsetHeight || 0;
+      const visibleTop = Math.max(queueRect.top, 0) + stickyHeaderHeight;
+      const visibleBottom = Math.min(queueRect.bottom, window.innerHeight);
+      if (activeRect.top < visibleTop) {
+        queue.scrollTop += activeRect.top - visibleTop - 8;
+      } else if (activeRect.bottom > visibleBottom) {
+        queue.scrollTop += activeRect.bottom - visibleBottom + 8;
+      }
+    });
+  }, [selectedId]);
   useEffect(() => {
     setActiveAnchor(0);
     setFocusMode(true);
@@ -854,18 +888,17 @@ export default function FindingsStage({
     }
     setSaving(true);
     try {
-      if (!demo)
-        await decideReviewFinding(
-          setId,
-          snapshot!.run.graph_id,
-          selected.finding_id,
-          {
-            decision: option.decision,
-            comment: comment.trim(),
-            resolution_code: option.code,
-            resolution_status: option.status,
-          },
-        );
+      await decideReviewFinding(
+        setId,
+        snapshot!.run.graph_id,
+        selected.finding_id,
+        {
+          decision: option.decision,
+          comment: comment.trim(),
+          resolution_code: option.code,
+          resolution_status: option.status,
+        },
+      );
       const saved: FindingDecision = {
         finding_id: selected.finding_id,
         decision: option.decision,
@@ -879,22 +912,6 @@ export default function FindingsStage({
         ...current.filter((item) => item.finding_id !== selected.finding_id),
         saved,
       ]);
-      if (demo)
-        queryClient.setQueryData<EvidenceGraphSnapshot>(
-          ["snapshot", setId, snapshot!.run.graph_id, demo],
-          (current) =>
-            current
-              ? {
-                  ...current,
-                  decisions: [
-                    ...(current.decisions || []).filter(
-                      (item) => item.finding_id !== selected.finding_id,
-                    ),
-                    saved,
-                  ],
-                }
-              : current,
-        );
       notifications.show({
         color: "green",
         title: "人工结论已保存",
@@ -904,8 +921,8 @@ export default function FindingsStage({
       // A decision changes the task queue counters and dashboard summaries.
       // Refresh those caches together with the current snapshot so returning
       // to another page never shows the previous pending count.
-      queryClient.invalidateQueries({ queryKey: ["sets", demo] });
-      queryClient.invalidateQueries({ queryKey: ["stats", demo] });
+      queryClient.invalidateQueries({ queryKey: ["sets"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
     } catch (error) {
       notifications.show({
         color: "red",
@@ -986,7 +1003,7 @@ export default function FindingsStage({
         className={`findings-workspace ${viewerWide ? "viewer-wide" : ""}`}
         style={{ "--detail-width": `${detailWidth}px` } as React.CSSProperties}
       >
-        <aside className={`finding-queue ${drawerOpen ? "mobile-open" : ""}`}>
+        <aside ref={queueRef} className={`finding-queue ${drawerOpen ? "mobile-open" : ""}`}>
           <div className="queue-mobile-head">
             <b>问题列表</b>
             <button onClick={onDrawerClose}>
@@ -1048,6 +1065,7 @@ export default function FindingsStage({
                     return (
                       <button
                         className={`${selected?.finding_id === item.finding_id ? "active" : ""} ${decision ? "decided" : ""}`}
+                        data-finding-id={item.finding_id}
                         key={item.finding_id}
                         onClick={() => selectFinding(item.finding_id)}
                       >
@@ -1063,8 +1081,8 @@ export default function FindingsStage({
                                 : "待处理"}
                           </em>
                         </div>
-                        <h3>{item.title}</h3>
-                        <p>{decision?.comment || item.description}</p>
+                        <h3>{item.title || item.metadata?.test_item || item.check_id || "未命名问题"}</h3>
+                        <p>{decision?.comment || item.description || "该问题暂未生成摘要，请打开详情查看原文证据。"}</p>
                       </button>
                     );
                   })}
@@ -1148,12 +1166,12 @@ export default function FindingsStage({
                         graphId={snapshot.run.graph_id}
                         page={page}
                         finding={selected}
-                        demo={demo}
                         onOpen={(pageKey) => {
                           setSelectedEvidenceId(pageKey);
                           setFocusMode(true);
                           setLightbox(true);
                         }}
+                        onEvidenceLocations={mergeEvidenceLocations}
                       />
                     ))}
                     {isCoverageFinding &&
@@ -1267,27 +1285,23 @@ export default function FindingsStage({
                       </button>
                     </div>
                   </div>
-                  {demo ? (
-                    <div
-                      className={`evidence-canvas ${focusMode ? "is-focused" : ""}`}
-                    >
-                      <MockEvidencePage
-                        page={currentEvidencePage}
-                        kinds={currentHighlightKinds}
-                        zoom={zoom}
-                      />
-                    </div>
-                  ) : (
-                    <EvidenceImageViewport
-                      className="evidence-canvas"
-                      url={previewUrl}
-                      activeAnchor={activeAnchor}
-                      focused={focusMode}
-                      zoom={zoom}
-                      onLocationChange={setCurrentPreviewLocated}
-                      alt={`${DOC_LABELS[currentEvidence.doc_type]}第${currentEvidence.page_number || ""}页完整原图${focusMode && previewLocated ? `，已滚动到第${activeAnchor + 1}处高亮` : ""}`}
-                    />
-                  )}
+                  <EvidenceImageViewport
+                    className="evidence-canvas"
+                    url={previewUrl}
+                    activeAnchor={activeAnchor}
+                    focused={focusMode}
+                    zoom={zoom}
+                    onLocationChange={(located, locatedAnchors) => {
+                      setCurrentPreviewLocated(located);
+                      mergeEvidenceLocations(Object.fromEntries(
+                        currentEvidencePage.records.map((record, index) => [
+                          record.evidence_id,
+                          locatedAnchors[index] ?? located,
+                        ]),
+                      ));
+                    }}
+                    alt={`${DOC_LABELS[currentEvidence.doc_type]}第${currentEvidence.page_number || ""}页完整原图${focusMode && previewLocated ? `，已滚动到第${activeAnchor + 1}处高亮` : ""}`}
+                  />
                 </>
               ) : (
                 <EmptyState
@@ -1433,7 +1447,18 @@ export default function FindingsStage({
                         )}
                       </b>
                       <span>{evidence.exact_quote || "未提取原文"}</span>
-                      <small>{evidenceSourceLocation(evidence)} · {evidenceAnchorLabel(evidence)}</small>
+                      <small>
+                        {evidenceSourceLocation(evidence)} · {evidenceAnchorLabel(
+                          evidence,
+                          evidenceLocationById[evidence.evidence_id] || (
+                            currentPreviewLocated && Boolean(
+                              currentEvidencePage?.records.some(
+                                (record) => record.evidence_id === evidence.evidence_id,
+                              ),
+                            )
+                          ),
+                        )}
+                      </small>
                     </button>
                   )) : <p>当前没有可展示的直接证据。</p>}
                 </div>
@@ -1565,7 +1590,7 @@ export default function FindingsStage({
                       technicalLocators.map((locator, index) => (
                         <div key={selectedEvidence[index].evidence_id}>
                           <code>{locator}</code>
-                          {!demo && user?.role === "admin" && (
+                          {user?.role === "admin" && (
                             <a
                               href={`/operations?tab=logs&keyword=${encodeURIComponent(selectedEvidence[index].evidence_id)}`}
                               target="_blank"
@@ -1581,7 +1606,7 @@ export default function FindingsStage({
                       <p>这条问题没有可显示的直接证据定位。</p>
                     )}
                   </div>
-                  {!demo && user?.role === "admin" && (
+                  {user?.role === "admin" && (
                     <a
                       className="technical-log-link"
                       href={`/operations?tab=logs&keyword=${encodeURIComponent(snapshot.run.graph_id)}`}
@@ -1695,30 +1720,21 @@ export default function FindingsStage({
             </a>
           </div>
         </div>
-        {currentEvidencePage &&
-          (demo ? (
-            <div className={`lightbox-canvas ${focusMode ? "is-focused" : ""}`}>
-              <MockEvidencePage
-                page={currentEvidencePage}
-                kinds={currentHighlightKinds}
-                zoom={zoom}
-              />
-            </div>
-          ) : (
-            <EvidenceImageViewport
-              className="lightbox-canvas"
-              url={previewUrl}
-              activeAnchor={activeAnchor}
-              focused={focusMode}
-              zoom={zoom}
-              onLocationChange={setCurrentPreviewLocated}
-              alt={
-                focusMode && previewLocated
-                  ? `全屏完整页，已滚动到第${activeAnchor + 1}处高亮`
-                  : "全屏多色证据完整页"
-              }
-            />
-          ))}
+        {currentEvidencePage && (
+          <EvidenceImageViewport
+            className="lightbox-canvas"
+            url={previewUrl}
+            activeAnchor={activeAnchor}
+            focused={focusMode}
+            zoom={zoom}
+            onLocationChange={setCurrentPreviewLocated}
+            alt={
+              focusMode && previewLocated
+                ? `全屏完整页，已滚动到第${activeAnchor + 1}处高亮`
+                : "全屏多色证据完整页"
+            }
+          />
+        )}
       </Modal>
     </div>
   );
@@ -1759,79 +1775,5 @@ function ComparisonValue({ value }: { value: unknown }) {
       </summary>
       <p>{items.join("、")}</p>
     </details>
-  );
-}
-
-function MockEvidencePage({
-  page,
-  kinds,
-  zoom,
-}: {
-  page: EvidencePageGroup;
-  kinds: HighlightKind[];
-  zoom: number;
-}) {
-  const evidence = page.records[0];
-  const isReport = evidence.doc_type === "final_report";
-  return (
-    <div className="mock-evidence-page" style={{ width: `${zoom}%` }}>
-      <div className="page-ruler">
-        {[10, 20, 30, 40, 50, 60, 70, 80, 90].map((mark) => (
-          <span key={mark}>{mark}</span>
-        ))}
-      </div>
-      <header>
-        <b>
-          {isReport
-            ? "EMC 检测报告 / TEST REPORT"
-            : "原始检测记录 / RAW TEST RECORD"}
-        </b>
-        <span>Page {evidence.page_number || 1}</span>
-      </header>
-      <h3>反向电压试验 / Reverse voltage</h3>
-      <table>
-        <tbody>
-          <tr>
-            <th>样品编号</th>
-            <td>E20260402869601-0016</td>
-            <th>工作模式</th>
-            <td>Mode 2</td>
-          </tr>
-          <tr>
-            <th>试验电压</th>
-            <td>14 V</td>
-            <th>持续时间</th>
-            <td>60 s</td>
-          </tr>
-          <tr>
-            <th>功能状态</th>
-            <td>C</td>
-            <th>试验结果</th>
-            <td>符合 / Pass</td>
-          </tr>
-        </tbody>
-      </table>
-      {page.records.map((item, index) => (
-        <div
-          key={item.evidence_id}
-          className={`mock-highlight-box ${kinds[index]}`}
-          style={{
-            top: `${238 + index * 46}px`,
-            left: `${index % 2 ? 48 : 25}%`,
-            width: `${index % 2 ? 42 : 56}%`,
-          }}
-        >
-          <i>{index + 1}</i>
-        </div>
-      ))}
-      <p>
-        试验过程中监测样品功能状态，试验结束后完成最终功能检查。结果记录与本页签名共同构成原始证据。
-      </p>
-      <div className="page-signatures">
-        <span>试验：王工</span>
-        <span>复核：李工</span>
-        <span>日期：2026-04-03</span>
-      </div>
-    </div>
   );
 }

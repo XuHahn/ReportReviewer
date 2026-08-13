@@ -384,6 +384,18 @@ def display_zip_filename(info: zipfile.ZipInfo) -> str:
         raw = original.encode("cp437")
     except UnicodeEncodeError:
         return original
+    # Python exposes non-UTF8 ZIP names through CP437.  A common producer bug
+    # is to store UTF-8 bytes without setting the UTF-8 flag; those bytes are
+    # losslessly recoverable and must win before permissive legacy codecs such
+    # as GB18030 are considered.  Score-only selection is unsafe here because
+    # decoding UTF-8 bytes as GB18030 can produce plausible-looking CJK
+    # mojibake with an even higher character score.
+    try:
+        utf8_candidate = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        utf8_candidate = ""
+    if utf8_candidate and _filename_quality(utf8_candidate) >= 0:
+        return utf8_candidate
     encodings = [
         item.strip() for item in os.getenv(
             "ZIP_LEGACY_ENCODINGS", "gb18030,big5,shift_jis",
@@ -401,6 +413,35 @@ def display_zip_filename(info: zipfile.ZipInfo) -> str:
             best = candidate
             best_score = score
     return best
+
+
+def archive_member_manifest(file_bytes: bytes) -> list[dict]:
+    """Return the stable, version-local identity of supported ZIP members.
+
+    ``member_index`` follows the same filtered archive order used by
+    unitization and preview.  It is the machine identity; display filenames
+    are presentation metadata and never participate in source lookup.
+    """
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+        infos = [info for info in archive.infolist() if not info.is_dir()]
+        _validate_zip(infos)
+        supported = [
+            info for info in infos
+            if not _is_ignored_zip_metadata(info)
+            and info.filename.lower().endswith((".pdf", ".docx", ".xlsx", ".xls"))
+        ]
+        manifest: list[dict] = []
+        for member_index, info in enumerate(supported, 1):
+            content = archive.read(info)
+            manifest.append({
+                "member_index": member_index,
+                "raw_filename": info.filename,
+                "display_filename": display_zip_filename(info),
+                "content_hash": hashlib.sha256(content).hexdigest(),
+                "file_size": len(content),
+                "media_type": Path(info.filename).suffix.lower().lstrip("."),
+            })
+        return manifest
 
 
 # Kept for callers and tests written before the decoder became a shared API.

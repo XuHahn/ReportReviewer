@@ -276,6 +276,66 @@ def test_published_named_parameter_is_compared_with_report_specification():
     assert findings[0].metadata["report_tokens"] == ["±1.5v"]
 
 
+def test_published_structured_parameters_are_compared_individually_not_as_clause_union():
+    plan = [ObservedTestItem(
+        item_id="p-reverse", doc_type="test_plan", name="Reversed voltage",
+        evidence_ids=["plan-e"], parameters={"standard_clause": "ISO-16750-2-4.7"},
+    )]
+    requirement_quote = (
+        "If the DUT withstands a reversed voltage, apply a test voltage of 4 V "
+        "for a duration of (60 ± 6) s."
+    )
+    release = {
+        "id": "rel-iso", "status": "published", "snapshot": {
+            "standard_code": "ISO 16750-2:2012", "source_file_sha256": "f" * 64,
+            "requirements": [{
+                "id": "req-reverse", "review_status": "confirmed",
+                "clause_number": "4.7.2", "requirement_type": "test_condition",
+                "evidence_quote": requirement_quote, "page_start": 17,
+                "parameters": [
+                    {"name": "测试电压", "value": "4", "unit": "V", "raw_text": "4 V"},
+                    {"name": "持续时间", "value": "60", "unit": "s", "raw_text": "(60 ± 6) s"},
+                ],
+            }],
+        },
+    }
+    report = {"item_extractions": [{
+        "test_item_name": "Reversed voltage",
+        "spec_parameters": [
+            {"name": "Reversed voltage", "value": "4V"},
+            {"name": "Reversed voltage", "value": "14V"},
+        ],
+    }]}
+    unit = EvidenceGraphDocumentUnit(
+        unit_id="report:54", graph_id="g", doc_id="report-doc",
+        doc_type="final_report", filename="report.docx", page_number=54,
+        native_text="TEST SPECIFICATION Reversed voltage 4V Reversed voltage 14V",
+        source_hash="e" * 64, rendered_pdf_hash="d" * 64,
+        page_width=595, page_height=842,
+        layout_lines=[
+            {"text": "Reversed voltage 4V", "bbox": [60, 140, 285, 163]},
+            {"text": "Reversed voltage 14V", "bbox": [60, 202, 286, 225]},
+        ],
+    )
+
+    evidence, _, findings, expected, anchored = build_standard_parameter_consistency(
+        "g", plan, [release],
+        {"final_report": {"doc_id": "report-doc", "filename": "report.docx"}},
+        [unit], {"final_report": [{
+            "field_name": "__structured__", "field_value": json.dumps(report),
+        }]},
+    )
+
+    assert expected == anchored == 2
+    assert len(findings) == 1
+    assert findings[0].metadata["report_value"] == "14V"
+    records = [item for item in evidence if item.evidence_id in findings[0].evidence_ids]
+    assert records[0].exact_quote != requirement_quote
+    assert "test voltage of 4 V" in records[0].exact_quote
+    assert records[1].exact_quote == "14V"
+    assert records[1].bbox == [60.0, 202.0, 286.0, 225.0]
+
+
 def test_severity_comparison_excludes_nominal_voltage_context():
     plan = [ObservedTestItem(
         item_id="p-ac", doc_type="test_plan", name="交变电压叠加实验",

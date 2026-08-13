@@ -1,4 +1,4 @@
-import type { DocumentSetListItem, DocumentSetOverview, EvidenceGraphFinding, FindingDecision, SetExtractionsResponse, ExtractionQualityGate } from './types'
+import type { DocumentSetListItem, DocumentSetOverview, EvidenceGraphFinding, FindingDecision, ExtractionQualityGate } from './types'
 
 export type InstrumentComparisonRow = {
   role: 'report_only' | 'raw_only' | 'matched_report' | 'matched_raw'
@@ -79,7 +79,7 @@ export function instrumentComparisonFor(
   }
 }
 
-export type ReviewStageKey = 'intake' | 'extraction' | 'run' | 'findings' | 'complete'
+export type ReviewStageKey = 'intake' | 'run' | 'findings' | 'complete'
 
 export function taskStartStage(
   task: Pick<DocumentSetListItem, 'status' | 'latest_run_status'>,
@@ -101,27 +101,15 @@ export function countDismissedMachineFindings(
 export function shouldPollOverview(
   overview: DocumentSetOverview | undefined,
   stage: ReviewStageKey,
-  demo: boolean,
 ) {
-  if (demo || !['intake', 'extraction'].includes(stage)) return false
+  if (stage !== 'intake') return false
   return Boolean(overview?.documents?.some(document =>
     ['pending', 'extracting', 'queued', 'processing'].includes(document.extraction_status || ''),
   ))
 }
 
-export function shouldPollExtractions(
-  response: SetExtractionsResponse | undefined,
-  demo: boolean,
-) {
-  if (demo) return false
-  return Boolean(response?.extractions.some(extraction =>
-    ['pending', 'extracting', 'queued', 'processing'].includes(extraction.status || ''),
-  ))
-}
-
 export function extractionGateFor(
   overview: DocumentSetOverview | undefined,
-  demo = false,
 ): ExtractionQualityGate {
   if (overview?.extraction_gate) return overview.extraction_gate
   const docs = overview?.documents || []
@@ -137,13 +125,12 @@ export function extractionGateFor(
     })
   const missing = required.filter(type => !docs.some(document => document.doc_type === type)).map(type => ({ doc_type: type, label: type, reason: '资料未上传' }))
   const allBlockers = [...missing, ...blockers]
-  if (demo && !allBlockers.length) return { status: 'pass', title: '资料已通过自动质量门禁', note: '演示资料可直接进入审核结果。', blockers: [], manual_review_required: false, auto_gate_allowed: true }
   return {
     status: allBlockers.length ? 'block' : 'pass',
-    title: allBlockers.length ? '需要处理提取异常' : '资料已通过自动质量门禁',
-    note: allBlockers.length ? '只显示异常资料，处理后才能锁定审核快照。' : '四份资料均形成完整、可追溯的提取快照，可直接进入审核结果。',
+    title: allBlockers.length ? '提取提示将进入审核结果' : '资料已通过自动质量门禁',
+    note: allBlockers.length ? '无需逐字段核查；系统会把可行动的提取异常作为待确认问题展示。' : '四份资料均形成完整、可追溯的提取快照，可直接进入审核结果。',
     blockers: allBlockers,
-    manual_review_required: Boolean(allBlockers.length),
+    manual_review_required: false,
     auto_gate_allowed: !allBlockers.length,
   }
 }

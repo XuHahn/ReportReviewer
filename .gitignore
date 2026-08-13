@@ -7,7 +7,6 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
-dist/
 .venv/
 venv/
 venv.broken-*/
@@ -47,8 +46,10 @@ Thumbs.db
 tmp/
 backups/
 
-# Local settings
-.claude/settings.local.json
+# Local agent/tool settings
+.claude/
+.codex/
+.mcp.json
 *.docx
 example/*
 !example/README.md

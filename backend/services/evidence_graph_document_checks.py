@@ -300,15 +300,148 @@ def _anchor_metadata(
 
 
 def _field_label_window(source: str, patterns: tuple[str, ...]) -> str:
-    """Return a short native-text window proving a labelled field was inspected."""
+    """Return only the visible field label, never unrelated following lines."""
     for pattern in patterns:
         match = re.search(pattern, source, re.IGNORECASE | re.MULTILINE)
         if not match:
             continue
-        tail = source[match.start():match.start() + 240]
-        lines = [line.strip() for line in tail.splitlines() if line.strip()]
-        return "\n".join(lines[:3])
+        return match.group(0).strip()
     return ""
+
+
+def _is_unfilled_placeholder(value: str) -> bool:
+    """Return true for visible template tokens that do not constitute a value."""
+    compact = re.sub(r"[\s:：]", "", str(value or "")).casefold()
+    if not compact:
+        return True
+    if re.fullmatch(r"(?:x{3,}|[_—–-]{2,}|\.{3,}|…{2,})", compact):
+        return True
+    return compact in {
+        "tbd", "todo", "待定", "待填写", "待补充", "未填写",
+        "请输入", "请填写", "report报告编号",
+    }
+
+
+def _missing_field_region_bbox(
+    unit: EvidenceGraphDocumentUnit,
+    label_bbox: list[float],
+) -> tuple[list[float], bool]:
+    """Extend a located label into its adjacent empty value region.
+
+    The region stops before another visible field on the same row.  This
+    represents negative evidence (a labelled field whose value area is empty)
+    without borrowing text from the next paragraph or page footer.
+    """
+    if len(label_bbox) != 4:
+        return [], False
+    x0, y0, x1, y1 = map(float, label_bbox)
+    page_width = float(unit.page_width or 0)
+    if page_width <= x1:
+        return [x0, y0, x1, y1], True
+    center_y = (y0 + y1) / 2
+    row_tolerance = max(8.0, (y1 - y0) * 0.8)
+    right_neighbors: list[tuple[list[float], str]] = []
+    for line in unit.layout_lines:
+        bbox = line.get("bbox") or []
+        if len(bbox) != 4:
+            continue
+        candidate = list(map(float, bbox))
+        if candidate[0] <= x1 + 2.0:
+            continue
+        candidate_center = (candidate[1] + candidate[3]) / 2
+        if abs(candidate_center - center_y) <= row_tolerance:
+            right_neighbors.append((candidate, str(line.get("text") or "")))
+    occupied_neighbors = [
+        (bbox, text) for bbox, text in right_neighbors
+        if not _is_unfilled_placeholder(text)
+    ]
+    placeholder_neighbors = [
+        (bbox, text) for bbox, text in right_neighbors
+        if _is_unfilled_placeholder(text)
+    ]
+    right_margin = max(18.0, page_width * 0.04)
+    region_x1 = page_width - right_margin
+    if occupied_neighbors:
+        region_x1 = min(region_x1, min(item[0][0] for item in occupied_neighbors) - 4.0)
+    elif placeholder_neighbors:
+        # Highlight the visible placeholder together with its label instead of
+        # stretching across the rest of the page.
+        region_x1 = min(
+            region_x1,
+            max(item[0][2] for item in placeholder_neighbors) + 4.0,
+        )
+    # Do not fabricate a wide blank area when the layout offers no room.
+    if region_x1 < x1 + 12.0:
+        region_x1 = x1
+    return [
+        max(0.0, x0 - 2.0), max(0.0, y0 - 2.0),
+        min(page_width, region_x1), min(float(unit.page_height or y1 + 2.0), y1 + 2.0),
+    ], not occupied_neighbors
+
+
+def _field_label_anchor(
+    unit: EvidenceGraphDocumentUnit,
+    patterns: tuple[str, ...],
+) -> tuple[str, list[float], dict]:
+    """Build one semantic anchor for a labelled-but-empty field."""
+    native_quote = _field_label_window(unit.native_text, patterns)
+    if not native_quote:
+        return "", [], {}
+    matches: list[tuple[str, list[float], bool]] = []
+    seen: set[tuple[float, ...]] = set()
+    for line in unit.layout_lines:
+        text = str(line.get("text") or "")
+        bbox = line.get("bbox") or []
+        if len(bbox) != 4:
+            continue
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if not match:
+                continue
+            box = list(map(float, bbox))
+            signature = tuple(box)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            residual = f"{text[:match.start()]} {text[match.end():]}"
+            residual_value = residual.strip(" \t:：")
+            has_other_text = bool(residual_value) and not _is_unfilled_placeholder(residual_value)
+            matches.append((match.group(0).strip(), box, has_other_text))
+    if len(matches) == 1:
+        quote, label_bbox, has_other_text = matches[0]
+        region_bbox, visibly_blank = _missing_field_region_bbox(unit, label_bbox)
+        # A visually occupied row means extraction is incomplete, not that the
+        # customer left the field blank. Fail closed instead of creating an error.
+        if has_other_text or not visibly_blank:
+            return "", [], {}
+        return quote or native_quote, region_bbox, {
+            "version": 2,
+            "status": "located",
+            "coordinate_space": "pdf_points",
+            "method": "missing_field_layout_region",
+            "kind": "missing_field",
+            "cardinality": "single_region",
+            "anchor_quote": quote or native_quote,
+            "label_bbox": label_bbox,
+            "rectangles": [region_bbox],
+            "rendered_pdf_hash": unit.rendered_pdf_hash,
+            "page_width": unit.page_width,
+            "page_height": unit.page_height,
+            "page_rotation": unit.page_rotation,
+        }
+    return native_quote, [], {
+        "version": 2,
+        "status": "text_anchored",
+        "coordinate_space": "",
+        "method": "missing_field_label_text",
+        "kind": "missing_field",
+        "cardinality": "single_region",
+        "anchor_quote": native_quote,
+        "rendered_pdf_hash": unit.rendered_pdf_hash,
+        "page_width": unit.page_width,
+        "page_height": unit.page_height,
+        "page_rotation": unit.page_rotation,
+    }
 
 
 def _normalized(field: str, value: str) -> str:
@@ -1136,14 +1269,15 @@ def build_reviewed_document_checks_and_audit(
             (r"(?:Issued?\s*Date|签发日期|报告日期)\s*[:：]?",),
         ))
     for check_id, field_name, title, description, patterns in missing_report_fields:
-        located = next((
-            (unit, quote)
-            for unit in units_by_type.get("final_report", [])
-            if (quote := _field_label_window(unit.native_text, patterns))
-        ), None)
+        located = None
+        for unit in units_by_type.get("final_report", []):
+            quote, bbox, source_anchor = _field_label_anchor(unit, patterns)
+            if quote:
+                located = (unit, quote, bbox, source_anchor)
+                break
         if located is None:
             continue
-        unit, quote = located
+        unit, quote, bbox, source_anchor = located
         source_missing_check_ids.add(check_id)
         evidence_id = _id("evidence", graph_id, check_id, field_name, "missing")
         node_id = _id("claim", graph_id, check_id, field_name, "missing")
@@ -1152,9 +1286,15 @@ def build_reviewed_document_checks_and_audit(
             doc_id=str(documents["final_report"].get("doc_id") or ""),
             doc_type="final_report",
             filename=str(documents["final_report"].get("filename") or ""),
-            page_number=unit.page_number, exact_quote=quote,
+            page_number=unit.page_number, bbox=bbox, exact_quote=quote,
+            content_hash=unit.source_hash,
             extraction_method="deterministic_missing_field_region", confidence=1,
-            metadata={"unit_id": unit.unit_id, "field_name": field_name},
+            metadata={
+                "unit_id": unit.unit_id,
+                "field_name": field_name,
+                "role": "missing_field",
+                "source_anchor": source_anchor,
+            },
         ))
         nodes.append(GraphNode(
             node_id=node_id, graph_id=graph_id, node_type=NodeType.CLAIM,

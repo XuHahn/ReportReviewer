@@ -1,7 +1,6 @@
 import axios from "axios";
 import type {
   ArchiveMemberInventory,
-  DocumentExtractionResponse,
   DocumentSetListItem,
   DocumentSetOverview,
   EmcStandard,
@@ -9,7 +8,6 @@ import type {
   EvidenceGraphSnapshot,
   LoginResponse,
   ProjectGroup,
-  SetExtractionsResponse,
   SetStatsResponse,
   StandardGraphClause,
   StandardGraphRequirement,
@@ -244,130 +242,6 @@ export async function lockDocumentSet(
 }
 export async function createDocumentSetRevision(setId: string) {
   return (await api.post(`/sets/${setId}/revision`)).data;
-}
-
-export function flattenStructuredFields(
-  value: unknown,
-  path = "",
-  inherited: { quote?: string; source?: string } = {},
-  output: any[] = [],
-): any[] {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) =>
-      flattenStructuredFields(item, `${path}[${index + 1}]`, inherited, output),
-    );
-    return output;
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const context = {
-      quote:
-        typeof record.source_quote === "string"
-          ? record.source_quote
-          : inherited.quote,
-      source:
-        typeof record.source_location === "string"
-          ? record.source_location
-          : inherited.source,
-    };
-    Object.entries(record).forEach(([key, item]) => {
-      if (
-        [
-          "source_quote",
-          "source_location",
-          "raw_text",
-          "extraction_metrics",
-          "failed_passes",
-          "extraction_quality",
-        ].includes(key)
-      )
-        return;
-      flattenStructuredFields(
-        item,
-        path ? `${path}.${key}` : key,
-        context,
-        output,
-      );
-    });
-    return output;
-  }
-  if (value !== "" && value != null && path)
-    output.push({
-      key: path,
-      field_name: path,
-      label: path,
-      value,
-      exact_quote: inherited.quote || "",
-      source: inherited.source || "",
-    });
-  return output;
-}
-
-export async function getExtractions(
-  setId: string,
-): Promise<SetExtractionsResponse> {
-  const raw = (await api.get<any>(`/sets/${setId}/extractions`)).data;
-  if (Array.isArray(raw.extractions)) return raw;
-  const extractions = Object.entries(raw.extractions || {}).map(
-    ([docType, value]) => {
-      const item = value as any;
-      const fields = (item.fields || []).map((field: any) => ({
-        ...field,
-        key: field.field_name,
-        label: field.field_name,
-        value: field.value ?? field.field_value,
-        exact_quote: field.exact_quote ?? field.source_text ?? "",
-        source: field.source_location,
-      }));
-      return {
-        ...item,
-        doc_type: docType,
-        status: ["done", "partial"].includes(item.status)
-          ? "completed"
-          : item.status,
-        method: item.extraction_meta?.method || item.extraction_quality || "",
-        confidence: item.extraction_meta?.confidence,
-        fields: fields.length
-          ? fields
-          : flattenStructuredFields(item.structured),
-      };
-    },
-  );
-  return { set_id: raw.set_id || setId, extractions } as SetExtractionsResponse;
-}
-export async function getDocumentExtraction(setId: string, docId: string) {
-  return (
-    await api.get<DocumentExtractionResponse>(
-      `/sets/${setId}/documents/${docId}/extraction`,
-    )
-  ).data;
-}
-export async function saveOverrides(
-  setId: string,
-  docId: string,
-  overrides: Record<string, string>,
-) {
-  return (
-    await api.patch(`/sets/${setId}/documents/${docId}/overrides`, {
-      overrides,
-    })
-  ).data;
-}
-export async function confirmDocumentReview(setId: string, docId: string) {
-  return (
-    await api.post(`/sets/${setId}/documents/${docId}/review-confirmation`)
-  ).data;
-}
-export async function getOverrides(setId: string, docId: string) {
-  return (await api.get(`/sets/${setId}/documents/${docId}/overrides`)).data;
-}
-export async function retryExtraction(setId: string, docId: string) {
-  return (await api.post(`/sets/${setId}/documents/${docId}/retry-extraction`))
-    .data;
-}
-export async function cancelExtraction(setId: string, docId: string) {
-  return (await api.post(`/sets/${setId}/documents/${docId}/cancel-extraction`))
-    .data;
 }
 
 export async function getVersionHistory(setId: string, docType: string) {

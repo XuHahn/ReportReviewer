@@ -23,18 +23,15 @@ cp backend/.env.example backend/.env
 ./start.sh
 ```
 
-启动顺序为后端 → 前端 → 本地视觉模型。后端和页面会先可用，千问视觉模型在后台异步加载；V2 页面顶部显示“视觉模型准备中”，就绪后自动更新，无需刷新页面。
+启动顺序为后端 → 前端 → 本地视觉模型。后端和页面会先可用，千问视觉模型在后台异步加载；页面顶部显示“视觉模型准备中”，就绪后自动更新，无需刷新页面。
 
 正式部署时可将 `UNIFIED_REVIEW_START_LOCAL_VISION=false`，把 `UNIFIED_REVIEW_VISION_BASE_URL` 指向独立常驻的 OpenAI 兼容视觉服务；后端只做异步健康探测和请求连接，不再负责模型生命周期。
 
 默认地址：
 
-- 统一前端：<http://localhost:5173>
-- 影子前端 V2：在 `frontend-v2/` 运行 `npm run dev` 后访问 <http://localhost:5174>
+- 审核前端：<http://localhost:5174>
 - 后端 API：<http://localhost:8000>
 - API 文档：<http://localhost:8000/docs>
-
-若只需查看不依赖后端的影子演示，可直接访问 `http://localhost:5174/?demo=1`。本次进度快照见 [frontend-v2-progress-20260809.md](design/frontend-v2-progress-20260809.md)。
 
 本地 Apple Silicon 千问视觉运行时：
 
@@ -65,7 +62,6 @@ UNIFIED_REVIEW_TEXT_MODEL=
 
 ```bash
 cd backend && pytest -q tests/
-cd ../frontend && npm run build
 cd ../frontend-v2 && npm run build
 ```
 
@@ -80,4 +76,5 @@ cd ../frontend-v2 && npm run build
 - `backend/services/evidence_graph_relationships.py`：关系提议与反驳门禁。
 - `backend/services/evidence_graph_store.py`：证据图、结论、事件和人工裁决持久化。
 - `backend/services/evidence_graph_standard_advisory.py`：已发布标准的提醒检查。
-- `frontend/src/components/ReviewTaskWorkbench.tsx`：统一审核工作台。
+- `frontend-v2/src/pages/ReviewWorkspace.tsx`：统一审核工作台与四阶段路由。
+- `frontend-v2/src/pages/review/FindingsStage.tsx`：原图证据与人工裁决工作台。

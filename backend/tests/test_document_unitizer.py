@@ -176,6 +176,13 @@ def test_utf8_zip_filename_is_never_reinterpreted():
     assert document_unitizer.display_zip_filename(info) == "原始记录.pdf"
 
 
+def test_utf8_bytes_without_zip_flag_are_preferred_before_legacy_codecs():
+    expected = "E202508277046_反向电压_0016_Mode 2_原始记录.pdf"
+    info = zipfile.ZipInfo(expected.encode("utf-8").decode("cp437"))
+    info.flag_bits = 0
+    assert document_unitizer.display_zip_filename(info) == expected
+
+
 def test_utf8_flag_does_not_preserve_obvious_cp437_mojibake():
     expected = "供电电压瞬时下降_原始记录.pdf"
     info = zipfile.ZipInfo(expected.encode("gbk").decode("cp437"))

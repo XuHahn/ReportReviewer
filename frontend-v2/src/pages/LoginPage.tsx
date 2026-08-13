@@ -39,7 +39,7 @@ export default function LoginPage() {
         <Button type="submit" size="lg" fullWidth loading={loading} disabled={!employeeId.trim()} rightSection={<ArrowRight size={17} />}>登录</Button>
         <small className="login-note">登录后只显示当前审核数据库中的真实任务与结果。</small>
       </form>
-      <footer>EMC REPORT REVIEW · SHADOW V2</footer>
+      <footer>EMC REPORT REVIEW</footer>
     </section>
   </main>
 }

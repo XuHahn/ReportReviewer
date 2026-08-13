@@ -102,6 +102,75 @@ def test_reviewed_short_field_value_keeps_unique_labeled_layout_anchor():
     assert record.metadata["source_anchor"]["anchor_quote"] == "样品名称：雾灯"
 
 
+def test_missing_field_anchors_label_and_blank_region_without_following_lines():
+    units = _units(extra_report_text=(
+        "\nIssued Date:\nGRG METROLOGY & TEST GROUP CO., LTD.\nAddress: No.8 Road"
+    ))
+    report = units[3]
+    report.page_number = 1
+    report.source_hash = "a" * 64
+    report.rendered_pdf_hash = "b" * 64
+    report.page_width = 595
+    report.page_height = 842
+    report.layout_lines = [
+        {"text": "Issued Date:", "bbox": [397, 665, 449, 677]},
+        {"text": "GRG METROLOGY & TEST GROUP CO., LTD.", "bbox": [175, 726, 421, 739]},
+        {"text": "Address: No.8 Road", "bbox": [136, 740, 260, 752]},
+    ]
+
+    evidence, _, findings = build_reviewed_document_checks(
+        "graph-1", _documents(), units, _metadata(),
+    )
+
+    finding = next(item for item in findings if item.check_id == "DOC-TIMELINE-002")
+    record = next(item for item in evidence if item.evidence_id in finding.evidence_ids)
+    assert record.exact_quote == "Issued Date:"
+    assert record.bbox == [395.0, 663.0, 571.2, 679.0]
+    assert record.content_hash == "a" * 64
+    assert record.metadata["role"] == "missing_field"
+    assert record.metadata["source_anchor"]["kind"] == "missing_field"
+    assert record.metadata["source_anchor"]["rectangles"] == [record.bbox]
+
+
+def test_missing_field_does_not_turn_visually_present_value_into_error():
+    units = _units(extra_report_text="\nIssued Date: 2026-06-02")
+    report = units[3]
+    report.page_number = 1
+    report.page_width = 595
+    report.page_height = 842
+    report.layout_lines = [
+        {"text": "Issued Date: 2026-06-02", "bbox": [397, 665, 535, 677]},
+    ]
+
+    _, _, findings = build_reviewed_document_checks(
+        "graph-1", _documents(), units, _metadata(),
+    )
+
+    assert not [item for item in findings if item.check_id == "DOC-TIMELINE-002"]
+
+
+def test_missing_field_treats_visible_template_token_as_unfilled_value():
+    units = _units(extra_report_text="\nTest Plan No.:\nxxxxxx")
+    report = units[3]
+    report.page_number = 1
+    report.page_width = 595
+    report.page_height = 842
+    report.layout_lines = [
+        {"text": "Test Plan No.:", "bbox": [90, 179, 151, 194]},
+        {"text": "xxxxxx", "bbox": [175, 179, 206, 194]},
+    ]
+
+    evidence, _, findings = build_reviewed_document_checks(
+        "graph-1", _documents(), units, _metadata(),
+    )
+
+    finding = next(item for item in findings if item.check_id == "DOC-PLAN-REF-001")
+    record = next(item for item in evidence if item.evidence_id in finding.evidence_ids)
+    assert record.exact_quote == "Test Plan No.:"
+    assert record.bbox == [88.0, 177.0, 210.0, 196.0]
+    assert record.metadata["source_anchor"]["kind"] == "missing_field"
+
+
 def test_plan_declared_clause_must_match_detailed_instruction_clause():
     metadata = _metadata()
     metadata["test_plan"] = _rows({

@@ -48,6 +48,27 @@ _extraction_semaphore = asyncio.Semaphore(MAX_CONCURRENT_EXTRACTIONS)
 _running_extractions: dict[str, asyncio.Task] = {}
 
 
+def _evidence_anchor_signature(item) -> str:
+    """Hash every visual input while treating lazy enrichment as cache-neutral."""
+    metadata = dict(item.metadata)
+    source_anchor = metadata.get("source_anchor")
+    preview_enriched = bool(
+        isinstance(source_anchor, dict)
+        and str(source_anchor.get("method") or "").startswith("preview_")
+    )
+    if preview_enriched:
+        metadata.pop("source_anchor", None)
+    payload = {
+        "quote": item.exact_quote,
+        "bbox": [] if preview_enriched else item.bbox,
+        "metadata": metadata,
+        "extraction_method": getattr(item, "extraction_method", ""),
+    }
+    return hashlib.sha256(json_mod.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+
+
 async def _run_unified_review_background(
     *, set_id: str, graph_id: str, gateway, store,
 ) -> None:
@@ -261,12 +282,20 @@ async def preview_unified_review_evidence(
     page_evidence = [evidence, *related]
     kinds = [item.strip() for item in highlight_kinds.split(",")]
     allowed_kinds = {"error", "warning", "success", "reference"}
-    highlights = [{
-        "quote": item.exact_quote,
-        "bbox": item.bbox,
-        "metadata": item.metadata,
-        "kind": kinds[index] if index < len(kinds) and kinds[index] in allowed_kinds else "error",
-    } for index, item in enumerate(page_evidence)]
+    highlights = []
+    for index, item in enumerate(page_evidence):
+        preview_metadata = {**item.metadata, "_extraction_method": item.extraction_method}
+        if item.extraction_method == "deterministic_missing_field_region":
+            preview_metadata.setdefault("role", "missing_field")
+        highlights.append({
+            "quote": item.exact_quote,
+            "bbox": item.bbox,
+            "metadata": preview_metadata,
+            "kind": (
+                kinds[index]
+                if index < len(kinds) and kinds[index] in allowed_kinds else "error"
+            ),
+        })
 
     cache_key = evidence_preview_cache_key({
         "graph_id": graph_id,
@@ -274,6 +303,9 @@ async def preview_unified_review_evidence(
         "page_number": evidence.page_number,
         "evidence_ids": [item.evidence_id for item in page_evidence],
         "content_hashes": [item.content_hash for item in page_evidence],
+        # Locator enrichment and corrected quotes must invalidate an existing
+        # render even when the immutable evidence id stays the same.
+        "anchor_signatures": [_evidence_anchor_signature(item) for item in page_evidence],
         "highlight_kinds": [item["kind"] for item in highlights],
         "highlight_labels": [
             str(item["metadata"].get("role") or item["metadata"].get("verdict") or "")
@@ -361,9 +393,16 @@ async def preview_unified_review_evidence(
             preview.locator_strategies[index]
             if index < len(preview.locator_strategies) else "none"
         )
+        resolved_rectangles = (
+            preview.resolved_rectangles[index]
+            if index < len(preview.resolved_rectangles) else ()
+        )
         if item.bbox or resolved_bbox is None or strategy not in {
             "exact_quote", "normalized_quote", "structured_comparison_row",
-            "structured_field_row",
+            "structured_field_row", "structured_parameter_value",
+            "structured_missing_field", "semantic_structured_row",
+            "semantic_parameter_ordinal_row", "strict_ordered_quote",
+            "structured_metadata_row",
         }:
             continue
         enriched = await asyncio.to_thread(
@@ -372,6 +411,7 @@ async def preview_unified_review_evidence(
             item.evidence_id,
             list(resolved_bbox),
             method=f"preview_{strategy}",
+            rectangles=[list(rectangle) for rectangle in resolved_rectangles],
             rendered_pdf_hash=preview.rendered_pdf_hash,
             page_width=preview.page_width,
             page_height=preview.page_height,
@@ -1039,6 +1079,7 @@ def _extract_raw_records_sync(file_bytes: bytes) -> tuple[str, str]:
     """
     import zipfile, io, tempfile, os
     from services.document_unitizer import (
+        archive_member_manifest,
         display_zip_filename,
     )
     plain_text = ""
@@ -1047,6 +1088,7 @@ def _extract_raw_records_sync(file_bytes: bytes) -> tuple[str, str]:
     with tempfile.TemporaryDirectory() as tmpdir:
         # Step 1: Extract entire ZIP to disk
         display_names: dict[str, str] = {}
+        identities_by_raw_name: dict[str, list[dict]] = {}
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
             members = zf.infolist()
             if len(members) > MAX_ZIP_FILES:
@@ -1073,10 +1115,15 @@ def _extract_raw_records_sync(file_bytes: bytes) -> tuple[str, str]:
                 if unix_mode and stat.S_ISLNK(unix_mode):
                     raise ValueError(f"ZIP 包含符号链接: {item.filename}")
                 display_names[item.filename] = display_zip_filename(item)
+            for identity in archive_member_manifest(file_bytes):
+                identities_by_raw_name.setdefault(
+                    str(identity.get("raw_filename") or ""), [],
+                ).append(identity)
             zf.extractall(tmpdir)
 
         # Step 2: Walk disk to find all files
-        pdf_entries: list[tuple[str, str]] = []  # decoded display name, full path
+        # decoded display name, full path, stable archive index, member hash
+        pdf_entries: list[tuple[str, str, int, str]] = []
         all_names: list[str] = []
         for root, dirs, files in os.walk(tmpdir):
             for f in files:
@@ -1084,18 +1131,28 @@ def _extract_raw_records_sync(file_bytes: bytes) -> tuple[str, str]:
                     continue
                 full_path = os.path.join(root, f)
                 relative_name = Path(full_path).relative_to(tmpdir).as_posix()
-                display_name = Path(display_names.get(relative_name, relative_name)).name
+                display_name = (
+                    display_names.get(relative_name, relative_name)
+                    .replace("\\", "/").rsplit("/", 1)[-1]
+                )
                 all_names.append(display_name)
                 if f.lower().endswith('.pdf'):
-                    pdf_entries.append((display_name, full_path))
+                    identities = identities_by_raw_name.get(relative_name, [])
+                    identity = identities.pop(0) if identities else {}
+                    pdf_entries.append((
+                        display_name,
+                        full_path,
+                        int(identity.get("member_index") or 0),
+                        str(identity.get("content_hash") or ""),
+                    ))
 
         if not pdf_entries:
             plain_text = f"ZIP 包含 {len(all_names)} 个文件，未找到 PDF"
             return plain_text, structured_json
 
         # Sort for deterministic processing order
-        pdf_entries.sort(key=lambda item: (item[0], item[1]))
-        pdf_names = [name for name, _path in pdf_entries]
+        pdf_entries.sort(key=lambda item: (item[0], item[2], item[1]))
+        pdf_names = [name for name, _path, _index, _hash in pdf_entries]
         all_names.sort()
 
         plain_text = (
@@ -1120,10 +1177,13 @@ def _extract_raw_records_sync(file_bytes: bytes) -> tuple[str, str]:
         # Step 3: Parse filenames — only ASCII segments are reliable.
         # Chinese fields will be overridden from PDF content in step 4.
         metas = [parse_filename_or_fallback(name) for name in pdf_names]
+        for meta, (_name, _path, member_index, member_hash) in zip(metas, pdf_entries):
+            meta.archive_member_index = member_index
+            meta.archive_member_hash = member_hash
 
         # Step 4: Read each PDF from disk, extract text,
         # override ALL Chinese fields from PDF content
-        for m, (_display_name, pdf_path) in zip(metas, pdf_entries):
+        for m, (_display_name, pdf_path, _member_index, _member_hash) in zip(metas, pdf_entries):
             if not os.path.exists(pdf_path):
                 continue
             with open(pdf_path, 'rb') as pf:
@@ -1350,6 +1410,14 @@ async def _extract_and_update(set_id: str, doc_id: str, doc_type: str,
             import asyncio
             plain_text = ""
             try:
+                from services.document_unitizer import archive_member_manifest
+                member_manifest = await asyncio.to_thread(
+                    archive_member_manifest, file_bytes,
+                )
+                await database.replace_document_archive_members_async(
+                    doc_id, member_manifest,
+                )
+                extraction_meta["archive_member_count"] = len(member_manifest)
                 loop = asyncio.get_event_loop()
                 plain_text, structured_json = await loop.run_in_executor(
                     None, _extract_raw_records_sync, file_bytes)
@@ -2248,28 +2316,30 @@ async def list_archive_member_files(
         raise HTTPException(404, detail="原始文件不存在或已被清理")
 
     import zipfile
-    from services.document_unitizer import _is_ignored_zip_metadata
+    from services.document_unitizer import archive_member_manifest
     try:
-        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
-            supported = [
-                info for info in archive.infolist()
-                if not info.is_dir()
-                and not _is_ignored_zip_metadata(info)
-                and info.filename.lower().endswith((".pdf", ".docx", ".xlsx", ".xls"))
-            ]
-    except (zipfile.BadZipFile, RuntimeError, OSError):
+        manifest = await database.get_document_archive_members_async(doc_id)
+        if not manifest:
+            manifest = await asyncio.to_thread(archive_member_manifest, file_bytes)
+            await database.replace_document_archive_members_async(doc_id, manifest)
+    except (zipfile.BadZipFile, RuntimeError, OSError, ValueError):
         raise HTTPException(422, detail="原始记录压缩包无法读取")
 
-    from services.document_unitizer import display_zip_filename
-
-    indices_by_basename: dict[str, list[int]] = {}
+    indices_by_name: dict[str, list[int]] = {}
     archive_names: dict[int, str] = {}
     display_names: dict[int, str] = {}
-    for index, info in enumerate(supported, 1):
-        basename = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
-        indices_by_basename.setdefault(basename, []).append(index)
-        archive_names[index] = basename
-        display_names[index] = display_zip_filename(info).replace("\\", "/").rsplit("/", 1)[-1]
+    hashes_by_index: dict[int, str] = {}
+    for member in manifest:
+        index = int(member.get("member_index") or 0)
+        raw_name = str(member.get("raw_filename") or "")
+        display_name = str(member.get("display_filename") or raw_name)
+        raw_basename = raw_name.replace("\\", "/").rsplit("/", 1)[-1]
+        display_basename = display_name.replace("\\", "/").rsplit("/", 1)[-1]
+        for candidate in {raw_basename, display_basename}:
+            indices_by_name.setdefault(candidate, []).append(index)
+        archive_names[index] = raw_basename
+        display_names[index] = display_basename
+        hashes_by_index[index] = str(member.get("content_hash") or "")
 
     structured: dict = {}
     for row in await database.get_extracted_metadata_async(doc_id):
@@ -2286,8 +2356,21 @@ async def list_archive_member_files(
         if not isinstance(meta, dict):
             continue
         source_filename = str(meta.get("filename") or "")
-        candidates = indices_by_basename.get(source_filename, [])
-        member_index = candidates.pop(0) if candidates else 0
+        member_index = int(meta.get("archive_member_index") or 0)
+        member_hash = str(meta.get("archive_member_hash") or "")
+        if member_index not in archive_names or (
+            member_hash and hashes_by_index.get(member_index) != member_hash
+        ):
+            member_index = 0
+        if not member_index and member_hash:
+            matches = [
+                index for index, content_hash in hashes_by_index.items()
+                if content_hash == member_hash
+            ]
+            member_index = matches[0] if len(matches) == 1 else 0
+        if not member_index:
+            candidates = indices_by_name.get(source_filename, [])
+            member_index = candidates.pop(0) if candidates else 0
         header = meta.get("_header_fields") if isinstance(meta.get("_header_fields"), dict) else {}
         members.append({
             "member_index": member_index,
@@ -2314,6 +2397,6 @@ async def list_archive_member_files(
     return {
         "doc_id": doc_id,
         "filename": target.get("filename", ""),
-        "total": len(supported),
+        "total": len(manifest),
         "members": members,
     }

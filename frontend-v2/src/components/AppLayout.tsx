@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { ActionIcon, Menu, Tooltip, useMantineColorScheme } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { Activity, AlertTriangle, BookOpenCheck, ChevronDown, FileCheck2, LayoutDashboard, LoaderCircle, LogOut, Menu as MenuIcon, Moon, Sun, UserRoundCog, UsersRound, X } from 'lucide-react'
@@ -18,14 +18,13 @@ const navItems = [
 const roleLabel = { admin: '管理员', reviewer: '审核员', standard_reviewer: '标准审核员', viewer: '查看者' }
 
 export default function AppLayout() {
-  const { user, demo, signOut } = useSession()
+  const { user, signOut } = useSession()
   const location = useLocation()
-  const navigate = useNavigate()
   const { colorScheme, setColorScheme } = useMantineColorScheme()
   const [mobileOpen, setMobileOpen] = useState(false)
   const healthQuery = useQuery({
-    queryKey: ['health', demo],
-    queryFn: () => demo ? Promise.resolve({ status: 'demo', vision: { status: 'ready' } }) : getHealth(),
+    queryKey: ['health'],
+    queryFn: getHealth,
     enabled: Boolean(user),
     refetchOnWindowFocus: true,
     refetchInterval: query => query.state.data?.vision?.status === 'preparing' ? 2000 : 15000,
@@ -47,7 +46,6 @@ export default function AppLayout() {
         </NavLink>)}
       </nav>
       <div className="header-actions">
-        {demo && <button className="demo-badge" onClick={() => { signOut(); navigate('/login', { replace: true }) }}>退出演示预览</button>}
         <Tooltip label={colorScheme === 'dark' ? '切换浅色模式' : '切换深色模式'}>
           <ActionIcon variant="subtle" color="gray" aria-label="切换颜色模式" onClick={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}>
             {colorScheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
@@ -67,6 +65,6 @@ export default function AppLayout() {
     </header>
     {visionStatus === 'preparing' && <div className="vision-status-banner" role="status"><LoaderCircle className="spin" size={17}/><span><b>视觉模型准备中</b><small>后端已启动，千问视觉模型正在后台加载；页面会自动更新，期间可以继续浏览其他内容。</small></span></div>}
     {visionStatus === 'unavailable' && <div className="vision-status-banner warning" role="alert"><AlertTriangle size={17}/><span><b>视觉模型暂不可用</b><small>需要视觉识别的提取或审核会在模型恢复后再执行，请查看系统运维中的运行日志。</small></span></div>}
-    <main className="app-content"><Suspense fallback={<div className="loading-state">正在打开工作区…</div>}><Outlet /></Suspense></main>
+    <main className={`app-content ${visionStatus === 'preparing' || visionStatus === 'unavailable' ? 'has-vision-banner' : ''}`}><Suspense fallback={<div className="loading-state">正在打开工作区…</div>}><Outlet /></Suspense></main>
   </div>
 }

@@ -365,13 +365,21 @@ class EvidenceGraphStore:
         bbox: list[float],
         *,
         method: str,
+        rectangles: list[list[float]] | None = None,
         rendered_pdf_hash: str = "",
         page_width: float = 0,
         page_height: float = 0,
+        content_hash: str = "",
+        anchor_quote: str = "",
     ) -> bool:
         """Persist a verified lazy locator without rewriting existing anchors."""
         if len(bbox) != 4:
             return False
+        verified_rectangles = [
+            list(map(float, rectangle))
+            for rectangle in (rectangles or [])
+            if isinstance(rectangle, (list, tuple)) and len(rectangle) == 4
+        ]
         with self._connect() as conn:
             row = conn.execute(
                 """SELECT bbox_json, metadata_json
@@ -387,19 +395,30 @@ class EvidenceGraphStore:
                     metadata.get("source_anchor", {})
                     if isinstance(metadata.get("source_anchor"), dict) else {}
                 ),
-                "version": 1,
+                "version": 2,
                 "status": "located",
                 "coordinate_space": "pdf_points",
                 "method": method,
+                "kind": str(
+                    (metadata.get("source_anchor") or {}).get("kind")
+                    if isinstance(metadata.get("source_anchor"), dict) else ""
+                ) or "quote",
+                "cardinality": "single_region",
+                "rectangles": verified_rectangles or [list(map(float, bbox))],
                 "rendered_pdf_hash": rendered_pdf_hash,
                 "page_width": page_width,
                 "page_height": page_height,
+                "anchor_quote": anchor_quote or str(
+                    (metadata.get("source_anchor") or {}).get("anchor_quote")
+                    if isinstance(metadata.get("source_anchor"), dict) else ""
+                ),
             }
             cursor = conn.execute(
                 """UPDATE evidence_graph_evidence
-                   SET bbox_json = ?, metadata_json = ?
+                   SET bbox_json = ?, metadata_json = ?,
+                       content_hash = CASE WHEN content_hash = '' THEN ? ELSE content_hash END
                    WHERE graph_id = ? AND evidence_id = ? AND bbox_json = '[]'""",
-                (_json(bbox), _json(metadata), graph_id, evidence_id),
+                (_json(bbox), _json(metadata), content_hash, graph_id, evidence_id),
             )
             return cursor.rowcount == 1
 

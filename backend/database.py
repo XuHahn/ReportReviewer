@@ -7,7 +7,7 @@ import time
 import hashlib
 import re
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from models import AuditLogEntry, EmcStandard, StandardClause, User
 from utils.logger import get_logger
 
@@ -266,6 +266,24 @@ def _migrate_document_sets():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sd_set ON set_documents(set_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sd_set_type ON set_documents(set_id, doc_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sd_parent ON set_documents(parent_doc_id)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS document_archive_members (
+                doc_id TEXT NOT NULL,
+                member_index INTEGER NOT NULL,
+                raw_filename TEXT NOT NULL DEFAULT '',
+                display_filename TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                media_type TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (doc_id, member_index),
+                FOREIGN KEY (doc_id) REFERENCES set_documents(doc_id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dam_hash "
+            "ON document_archive_members(doc_id, content_hash)"
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_em_doc ON extracted_metadata(doc_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_em_set ON extracted_metadata(set_id)")
 
@@ -2593,6 +2611,60 @@ async def get_file_content_async(doc_id: str) -> bytes | None:
     return await _run_async(get_file_content, doc_id)
 
 
+def replace_document_archive_members(doc_id: str, members: list[dict]) -> None:
+    """Replace one document version's ZIP manifest atomically."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM set_documents WHERE doc_id = ?", (doc_id,),
+        ).fetchone():
+            raise ValueError("文档不存在")
+        conn.execute("DELETE FROM document_archive_members WHERE doc_id = ?", (doc_id,))
+        conn.executemany(
+            """INSERT INTO document_archive_members
+               (doc_id, member_index, raw_filename, display_filename,
+                content_hash, file_size, media_type, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(
+                doc_id,
+                int(item.get("member_index") or 0),
+                str(item.get("raw_filename") or ""),
+                str(item.get("display_filename") or ""),
+                str(item.get("content_hash") or ""),
+                int(item.get("file_size") or 0),
+                str(item.get("media_type") or ""),
+                now,
+            ) for item in members],
+        )
+
+
+def get_document_archive_members(doc_id: str) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT member_index, raw_filename, display_filename,
+                      content_hash, file_size, media_type
+               FROM document_archive_members
+               WHERE doc_id = ? ORDER BY member_index""",
+            (doc_id,),
+        ).fetchall()
+    return [{
+        "member_index": int(row[0]),
+        "raw_filename": row[1],
+        "display_filename": row[2],
+        "content_hash": row[3],
+        "file_size": int(row[4]),
+        "media_type": row[5],
+    } for row in rows]
+
+
+async def replace_document_archive_members_async(doc_id: str, members: list[dict]) -> None:
+    await _run_async(replace_document_archive_members, doc_id, members)
+
+
+async def get_document_archive_members_async(doc_id: str) -> list[dict]:
+    return await _run_async(get_document_archive_members, doc_id)
+
+
 def get_stuck_documents() -> list[dict]:
     """Return documents whose extraction never completed — stuck in 'pending' or 'extracting'."""
     with _connect() as conn:
@@ -3424,6 +3496,7 @@ def delete_document(doc_id: str) -> bool:
     """
     with _connect() as conn:
         conn.execute("DELETE FROM extracted_metadata WHERE doc_id = ?", (doc_id,))
+        conn.execute("DELETE FROM document_archive_members WHERE doc_id = ?", (doc_id,))
         cur = conn.execute("DELETE FROM set_documents WHERE doc_id = ?", (doc_id,))
         return cur.rowcount > 0
 

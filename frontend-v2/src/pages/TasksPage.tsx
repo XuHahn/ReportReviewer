@@ -6,33 +6,31 @@ import { Link, useNavigate } from 'react-router-dom'
 import { notifications } from '@mantine/notifications'
 import { apiErrorMessage, createDocumentSet, createDocumentSetRevision, deleteDocumentSet, listDocumentSets } from '../api'
 import { useSession } from '../App'
-import { demoSets } from '../mockData'
 import { EmptyState, LoadingState, PageHeader, StatusPill, formatDate } from '../components/common'
 import { taskStartStage } from '../reviewLogic'
 
 export default function TasksPage() {
-  const { demo, user } = useSession()
+  const { user } = useSession()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<string | null>('all')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
-  const setsQuery = useQuery({ queryKey: ['sets', demo], queryFn: () => demo ? Promise.resolve({ sets: demoSets, total: demoSets.length }) : listDocumentSets(), refetchOnMount: 'always', refetchOnWindowFocus: true })
+  const setsQuery = useQuery({ queryKey: ['sets'], queryFn: () => listDocumentSets(), refetchOnMount: 'always', refetchOnWindowFocus: true })
   const filtered = useMemo(() => (setsQuery.data?.sets || []).filter(item => {
     const text = `${item.set_id} ${item.title || ''} ${item.project_group_name || ''}`.toLowerCase()
     const statusMatch = !status || status === 'all' || (status === 'active' ? item.status !== 'reviewed' : item.status === status)
     return statusMatch && text.includes(query.trim().toLowerCase())
   }), [setsQuery.data, query, status])
 
-  const remove = useMutation({ mutationFn: (id: string) => demo ? Promise.resolve({ deleted: true }) : deleteDocumentSet(id), onSuccess: () => { setDeleteTarget(null); queryClient.invalidateQueries({ queryKey: ['sets'] }); queryClient.invalidateQueries({ queryKey: ['stats', demo] }); notifications.show({ color: 'green', message: '任务已删除' }) }, onError: error => notifications.show({ color: 'red', message: apiErrorMessage(error) }) })
+  const remove = useMutation({ mutationFn: deleteDocumentSet, onSuccess: () => { setDeleteTarget(null); queryClient.invalidateQueries({ queryKey: ['sets'] }); queryClient.invalidateQueries({ queryKey: ['stats'] }); notifications.show({ color: 'green', message: '任务已删除' }) }, onError: error => notifications.show({ color: 'red', message: apiErrorMessage(error) }) })
 
   async function createTask() {
-    if (demo) { notifications.show({ color: 'blue', title: '当前是演示预览', message: '请退出演示并使用真实工号登录后新建审核。' }); return }
-    try { const result = await createDocumentSet(); await queryClient.invalidateQueries({ queryKey: ['sets', demo] }); await queryClient.invalidateQueries({ queryKey: ['stats', demo] }); navigate(`/tasks/${result.set_id}/intake`) }
+    try { const result = await createDocumentSet(); await queryClient.invalidateQueries({ queryKey: ['sets'] }); await queryClient.invalidateQueries({ queryKey: ['stats'] }); navigate(`/tasks/${result.set_id}/intake`) }
     catch (error) { notifications.show({ color: 'red', title: '新建失败', message: apiErrorMessage(error) }) }
   }
   async function revise(id: string) {
-    try { if (!demo) await createDocumentSetRevision(id); await queryClient.invalidateQueries({ queryKey: ['sets', demo] }); await queryClient.invalidateQueries({ queryKey: ['stats', demo] }); navigate(`/tasks/${id}/intake`) }
+    try { await createDocumentSetRevision(id); await queryClient.invalidateQueries({ queryKey: ['sets'] }); await queryClient.invalidateQueries({ queryKey: ['stats'] }); navigate(`/tasks/${id}/intake`) }
     catch (error) { notifications.show({ color: 'red', message: apiErrorMessage(error) }) }
   }
 

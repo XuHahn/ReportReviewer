@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countDismissedMachineFindings, instrumentComparisonFor, presentCheckExecution, shouldPollExtractions, shouldPollOverview, taskStartStage } from './reviewLogic'
+import { countDismissedMachineFindings, instrumentComparisonFor, presentCheckExecution, shouldPollOverview, taskStartStage } from './reviewLogic'
 import type { DocumentSetOverview } from './types'
 
 function overview(status: string): DocumentSetOverview {
@@ -10,27 +10,15 @@ function overview(status: string): DocumentSetOverview {
 }
 
 describe('shouldPollOverview', () => {
-  it('polls active extraction states on intake and extraction stages', () => {
-    expect(shouldPollOverview(overview('pending'), 'intake', false)).toBe(true)
-    expect(shouldPollOverview(overview('extracting'), 'extraction', false)).toBe(true)
+  it('polls active extraction states while the intake page is open', () => {
+    expect(shouldPollOverview(overview('pending'), 'intake')).toBe(true)
+    expect(shouldPollOverview(overview('extracting'), 'intake')).toBe(true)
   })
 
-  it('stops for terminal states, demo data, and later stages', () => {
-    expect(shouldPollOverview(overview('completed'), 'intake', false)).toBe(false)
-    expect(shouldPollOverview(overview('failed'), 'extraction', false)).toBe(false)
-    expect(shouldPollOverview(overview('extracting'), 'intake', true)).toBe(false)
-    expect(shouldPollOverview(overview('extracting'), 'run', false)).toBe(false)
-  })
-})
-
-describe('shouldPollExtractions', () => {
-  it('continues until every extraction reaches a terminal state', () => {
-    const response = { set_id: 'set-1', extractions: [{
-      doc_id: 'doc-1', doc_type: 'test_plan' as const, filename: 'plan.xls', status: 'pending',
-    }] }
-    expect(shouldPollExtractions(response, false)).toBe(true)
-    response.extractions[0].status = 'completed'
-    expect(shouldPollExtractions(response, false)).toBe(false)
+  it('stops for terminal states and later stages', () => {
+    expect(shouldPollOverview(overview('completed'), 'intake')).toBe(false)
+    expect(shouldPollOverview(overview('failed'), 'intake')).toBe(false)
+    expect(shouldPollOverview(overview('extracting'), 'run')).toBe(false)
   })
 })
 

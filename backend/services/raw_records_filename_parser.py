@@ -38,6 +38,10 @@ class RawRecordMeta:
     operator: str = ""
     record_timestamp: str = ""
     category: str = ""
+    # Stable identity inside the uploaded ZIP document version.  Filenames are
+    # presentation metadata and may be repaired for display.
+    archive_member_index: int = 0
+    archive_member_hash: str = ""
 
     # Populated later by pdf_extractor
     raw_text: str = ""

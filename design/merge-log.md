@@ -1,5 +1,17 @@
 # Merge Log
 
+## 2026-08-13 — V2 Consolidation and Durable Evidence Anchors
+
+- Removed the retired V1 frontend and temporary shadow/demo prototypes; `frontend-v2` is now the only maintained UI and only deployment target.
+- Removed fake-data fallbacks, the obsolete extraction-review stage, dead extraction API/types and unused V2 state modules. The active flow is now intake, machine review, finding decision and completion.
+- Kept extraction as a background operation with live query refresh; partial quality signals proceed into review as actionable findings instead of forcing a separate field-by-field checkpoint.
+- Updated local startup, setup, CORS and container definitions for the single V2 frontend. Local vision startup remains asynchronous and cannot tear down the API while the model is loading.
+- Added a version-scoped ZIP member manifest to the existing database. Archive members use index plus content hash as machine identity, while repaired UTF-8 names are presentation metadata; historical graphs remain bound to their original document version.
+- Added a unified evidence-anchor finalizer for direct finding evidence. It persists only uniquely confirmed structured rows, semantic table rows, strict contiguous text or parameter rows, and leaves ambiguous evidence at page level instead of drawing guessed boxes.
+- Added non-destructive lazy backfill for historical evidence anchors and reusable preview ETags/cache entries.
+- Updated project documentation, repository hygiene tests and ignore rules while preserving the real database, logs, sample sets and preview caches.
+- Verification: backend `476 passed, 13 skipped`; V2 unit tests `12 passed`; V2 production build and TypeScript unused-symbol checks passed; production dependency audit found zero vulnerabilities; shell syntax, YAML parsing and `git diff --check` passed. A real V2 rerun of `EMC-20260810-4q39sm` completed 210 units with zero failed units and persisted 229/328 direct-evidence coordinates; the reported conflict retained 3/3 anchored evidence items, member 41 displayed its correct Chinese name, and repeated preview access reused the 304 cache path.
+
 ## 2026-08-11 — Aggregated Bug Review and Traceability Fixes
 
 - Poll document-set and extraction-result queries only while a document is in an active extraction state, so background completion appears without a manual refresh.

@@ -37,6 +37,7 @@ from services.evidence_graph_structured_observations import (
     build_structured_check_results,
 )
 from services.evidence_graph_store import EvidenceGraphStore
+from services.evidence_anchor_finalizer import finalize_finding_evidence_anchors
 from services.test_item_aliases import alias_key_for, normalize_alias_text
 from services.unified_model_gateway import UnifiedModelGateway
 from services.finding_llm_explanation import enrich_finding_supplements
@@ -296,6 +297,20 @@ def _structured_result_identity_rows(
                         row.get("actual_performance") or ""
                     ),
                 },
+                "comparison_row": {
+                    "test_item": internal_name,
+                    "injection_point": str(row.get("injection_point") or ""),
+                    "spec_requirement": str(
+                        spec_params.get("测试规范要求")
+                        or spec_params.get("test_specification") or ""
+                    ),
+                    "test_duration": str(
+                        spec_params.get("测试时间") or spec_params.get("test_time") or ""
+                    ),
+                    "required_level": str(row.get("required_performance") or ""),
+                    "actual_level": str(row.get("actual_performance") or ""),
+                    "verdict_raw": str(row.get("test_result") or ""),
+                },
                 "source_kind": "internal_result_table",
             })
         return rows
@@ -379,6 +394,15 @@ def _structured_result_identity_rows(
                         "actual_level": str(
                             detail.get("actual_level") or ""
                         ),
+                    },
+                    "comparison_row": {
+                        "test_item": internal_name,
+                        "injection_point": str(detail.get("injection_point") or ""),
+                        "spec_requirement": str(detail.get("spec_requirement") or ""),
+                        "test_duration": str(detail.get("test_duration") or ""),
+                        "required_level": str(detail.get("required_level") or ""),
+                        "actual_level": str(detail.get("actual_level") or ""),
+                        "verdict_raw": str(detail.get("verdict") or ""),
                     },
                     "source_kind": "internal_result_table",
                 })
@@ -553,6 +577,8 @@ def _reviewed_result_authority(
                     "sample_id": str(row.get("sample_id") or ""),
                     "mode": str(row.get("mode") or ""),
                     "execution_round": str(row.get("execution_round") or ""),
+                    "comparison_rows": [dict(row.get("comparison_row") or {})]
+                    if isinstance(row.get("comparison_row"), dict) else [],
                     "source_anchor": source_anchor,
                 },
             ))
@@ -1281,6 +1307,12 @@ async def run_unified_review(
             documents=documents, units=units,
             metadata_by_doc_type=metadata_by_doc_type,
         )
+        anchor_finalization = await asyncio.to_thread(
+            finalize_finding_evidence_anchors, graph_id, store, units,
+        )
+        store.update_run_metadata(graph_id, {
+            "evidence_anchor_finalization": anchor_finalization,
+        })
         # Keep deterministic finding copy authoritative.  This optional,
         # evidence-bound batch only adds a short explanation and never blocks
         # or changes the review result when the model is unavailable.

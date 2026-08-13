@@ -96,6 +96,8 @@ export interface StandardGraphClause {
 }
 
 export interface StandardGraphRequirement {
+  /** API responses use `id`; `requirement_id` is kept for legacy snapshots. */
+  id?: string
   requirement_id: string
   clause_id?: string
   clause_number?: string
@@ -193,36 +195,6 @@ export interface SetStatsResponse {
   trends?: Array<{ date: string; count: number }>
   top_categories?: Array<{ category: string; count: number }>
 }
-
-export interface ExtractionField {
-  key?: string
-  field_name?: string
-  label?: string
-  value: unknown
-  confidence?: number
-  exact_quote?: string
-  page_number?: number
-  sheet_name?: string
-  bbox?: number[]
-  confirmed?: boolean
-  source?: string
-}
-
-export interface DocExtraction {
-  doc_id: string
-  doc_type: DocType
-  filename: string
-  status: string
-  method?: string
-  confidence?: number
-  fields?: ExtractionField[] | Record<string, unknown>
-  data?: Record<string, unknown>
-  error?: string
-  plain_text?: string
-}
-
-export interface SetExtractionsResponse { set_id: string; extractions: DocExtraction[] }
-export interface DocumentExtractionResponse extends DocExtraction { overrides?: Record<string, string> }
 
 export interface EvidenceGraphRunSummary {
   graph_id: string

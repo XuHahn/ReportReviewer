@@ -20,7 +20,7 @@ conda run -n "$CONDA_ENV_NAME" python -m pip install \
 
 echo ""
 echo "[2/2] 安装统一前端依赖..."
-(cd "$PROJECT_DIR/frontend" && npm install)
+(cd "$PROJECT_DIR/frontend-v2" && npm install)
 
 echo ""
 echo "============================================"
@@ -39,5 +39,5 @@ fi
 echo ""
 echo "启动命令："
 echo "  后端:  cd backend && conda run -n $CONDA_ENV_NAME python -m uvicorn main:app --port 8000"
-echo "  前端:  cd frontend && npm run dev"
+echo "  前端:  cd frontend-v2 && npm run dev"
 echo "  一键:  bash start.sh"
