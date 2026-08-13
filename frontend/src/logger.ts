@@ -32,15 +32,25 @@ const MAX_BUF = 50
 const FLUSH_INTERVAL_MS = 5000
 let buffer: LogEntry[] = []
 let flushTimer: ReturnType<typeof setInterval> | null = null
+let flushing = false
 
 function flush() {
-  if (buffer.length === 0) return
+  if (buffer.length === 0 || flushing) return
+  const token = localStorage.getItem('emc_review_token')
+  if (!token) return
   const batch = buffer.splice(0)
+  flushing = true
   fetch('/api/logs/batch', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ logs: batch }),
-  }).catch(() => { /* silently drop */ })
+    keepalive: true,
+  }).then((response) => {
+    if (!response.ok) throw new Error(`日志上报失败: HTTP ${response.status}`)
+  }).catch((error) => {
+    buffer = [...batch, ...buffer].slice(-MAX_BUF * 2)
+    console.warn('[WARN] 前端日志上报失败', error)
+  }).finally(() => { flushing = false })
 }
 
 function enqueue(entry: LogEntry) {

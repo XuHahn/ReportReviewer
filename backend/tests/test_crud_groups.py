@@ -45,7 +45,11 @@ class TestGroupRead:
         assert res.status_code == 200
         body = res.json()
 
-        db_count = db_conn.execute("SELECT COUNT(*) FROM project_groups").fetchone()[0]
+        db_count = db_conn.execute(
+            """SELECT COUNT(*) FROM project_groups pg
+               JOIN project_group_members pgm ON pgm.group_id = pg.id
+               WHERE pgm.employee_id = 'reviewer1'"""
+        ).fetchone()[0]
         assert len(body) == db_count
 
         for g in body:

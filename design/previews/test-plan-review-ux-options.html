@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>试验计划核查弹窗 UX 方案</title>
+  <style>
+    :root {
+      --page: #edf0f3;
+      --panel: #fff;
+      --line: #e4e7ec;
+      --line-soft: #f0f2f5;
+      --text: #1f2937;
+      --muted: #667085;
+      --subtle: #98a2b3;
+      --blue: #4f46e5;
+      --blue-soft: #eef2ff;
+      --green: #16a34a;
+      --green-soft: #ecfdf3;
+      --orange: #f59f00;
+      --orange-soft: #fff7e6;
+      --red: #ef4444;
+      --red-soft: #fff1f1;
+      --radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--text); }
+    .app { min-height: 100vh; display: flex; }
+    .side { width: 56px; background: #111827; padding: 12px 8px; display: flex; flex-direction: column; gap: 12px; }
+    .side .icon { width: 40px; height: 40px; border-radius: 8px; display: grid; place-items: center; color: #9ca3af; }
+    .side .on { background: #2563eb; color: #fff; }
+    .main { flex: 1; overflow: hidden; }
+    .topbar { height: 56px; background: #fff; border-bottom: 1px solid var(--line); display: flex; align-items: center; padding: 0 24px; font-weight: 700; }
+    .canvas { padding: 24px; }
+    .hint { max-width: 1480px; margin: 0 auto 14px; color: var(--muted); font-size: 13px; display: flex; gap: 10px; align-items: center; }
+    .seg { margin-left: auto; display: flex; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 2px; }
+    .seg button { border: 0; background: transparent; padding: 8px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font-weight: 650; }
+    .seg button.active { background: var(--blue); color: #fff; }
+    .modal { max-width: 1480px; height: calc(100vh - 116px); margin: 0 auto; background: var(--panel); border-radius: 14px; box-shadow: 0 14px 40px rgba(15,23,42,.15); display: flex; flex-direction: column; overflow: hidden; }
+    .modal-head { height: 58px; padding: 0 20px; border-bottom: 1px solid var(--line-soft); display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    .title { font-size: 18px; font-weight: 800; }
+    .badge { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; background: #f8f9fa; color: var(--subtle); font-size: 12px; font-weight: 700; }
+    .file { margin-left: auto; font-size: 12px; color: var(--subtle); }
+    .close { border: 0; background: transparent; color: var(--muted); font-size: 24px; cursor: pointer; }
+    .stats { height: 58px; border-bottom: 1px solid var(--line-soft); background: #fafbfc; display: flex; align-items: center; padding: 0 20px; gap: 22px; flex-shrink: 0; }
+    .stat b { font-size: 24px; margin-right: 6px; }
+    .green { color: var(--green); }
+    .orange { color: #e67700; }
+    .red { color: var(--red); }
+    .body { min-height: 0; flex: 1; overflow: hidden; }
+    .footer { height: 64px; border-top: 1px solid var(--line-soft); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; }
+    .btn { height: 38px; border-radius: 8px; padding: 0 16px; border: 1px solid #d0d5dd; background: #fff; color: #475467; font-weight: 700; cursor: pointer; }
+    .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .btn.warn { background: #e67700; border-color: #e67700; color: #fff; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .pill { display: inline-flex; align-items: center; justify-content: center; min-height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+    .pill.pending { background: var(--orange-soft); color: #e67700; }
+    .pill.ok { background: var(--green-soft); color: var(--green); }
+    .pill.warn { background: var(--red-soft); color: var(--red); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #f4b183; }
+    .dot.ok { background: var(--green); }
+    .muted { color: var(--muted); }
+    .subtle { color: var(--subtle); }
+    .mini { font-size: 12px; }
+    .hidden { display: none !important; }
+
+    /* Option A */
+    .a-layout { height: 100%; display: grid; grid-template-columns: 300px minmax(520px, 1fr) 360px; }
+    .a-left, .a-mid, .a-right { min-height: 0; overflow: auto; }
+    .a-left { border-right: 1px solid var(--line-soft); background: #fff; }
+    .a-mid { background: #fafbfc; border-right: 1px solid var(--line-soft); padding: 16px; }
+    .a-right { background: #fff; padding: 16px; }
+    .search { margin: 14px; height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; color: var(--subtle); display: flex; align-items: center; font-size: 13px; }
+    .group-title { padding: 8px 14px; background: #f8f9fa; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; font-weight: 800; display: flex; justify-content: space-between; }
+    .item { padding: 10px 14px; border-left: 3px solid transparent; border-bottom: 1px solid #f8f9fa; cursor: pointer; }
+    .item.active { border-left-color: var(--blue); background: var(--blue-soft); }
+    .item-title { font-weight: 800; font-size: 13px; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-meta { display: flex; gap: 6px; align-items: center; color: var(--subtle); font-size: 12px; }
+    .detail-card { background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+    .detail-card h3 { margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); font-size: 16px; }
+    .field-grid { display: grid; grid-template-columns: 130px 1fr 92px; }
+    .field-grid > div { padding: 11px 14px; border-bottom: 1px solid #f0f2f5; min-height: 44px; display: flex; align-items: center; }
+    .field-grid .label { color: var(--muted); font-weight: 800; background: #fafbfc; }
+    .field-grid .value { color: #344054; line-height: 1.5; }
+    .evidence { border: 1px solid #dbe4ff; background: #f8faff; border-radius: 8px; padding: 12px; color: #475467; line-height: 1.6; font-size: 13px; }
+    .side-box { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+    .side-box h4 { margin: 0; padding: 12px 14px; background: #fafbfc; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+    .side-box .line { padding: 10px 14px; border-bottom: 1px solid #f8f9fa; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+
+    /* Option B */
+    .b-layout { height: 100%; display: grid; grid-template-columns: 320px minmax(620px, 1fr) 360px; background: #fafbfc; }
+    .b-left { min-height: 0; overflow: auto; border-right: 1px solid var(--line-soft); background: #fff; }
+    .b-main { min-height: 0; overflow: auto; padding: 16px; }
+    .b-right { min-height: 0; overflow: auto; border-left: 1px solid var(--line-soft); background: #fff; padding: 16px; }
+    .summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .summary-cell { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 10px 12px; min-height: 62px; }
+    .summary-cell .k { color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 6px; }
+    .summary-cell .v { font-size: 15px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .matrix { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+    .matrix-row { display: grid; grid-template-columns: 280px 90px 120px minmax(220px, 1fr) minmax(260px, 1.25fr) 110px; border-bottom: 1px solid #f0f2f5; min-height: 52px; }
+    .matrix-row.head { background: #f8f9fa; color: var(--muted); font-weight: 800; min-height: 44px; }
+    .matrix-row > div { padding: 10px 12px; display: flex; align-items: center; border-right: 1px solid #f5f6f8; line-height: 1.45; font-size: 13px; }
+    .matrix-row > div:last-child { border-right: 0; }
+    .matrix-row.selected { background: #f8faff; box-shadow: inset 3px 0 0 var(--blue); }
+    .category-card { margin: 14px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .category-card .cap { padding: 12px; background: #fafbfc; border-bottom: 1px solid var(--line-soft); font-weight: 800; display: flex; justify-content: space-between; }
+    .category-card .mini-item { padding: 10px 12px; border-bottom: 1px solid #f8f9fa; font-size: 13px; }
+    .detail-list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+    .detail-list .cap { padding: 12px; background: #fafbfc; border-bottom: 1px solid var(--line-soft); font-size: 13px; font-weight: 800; }
+    .detail-list .entry { padding: 10px 12px; border-bottom: 1px solid #f8f9fa; }
+    .detail-list .entry .k { font-size: 12px; color: var(--muted); font-weight: 800; margin-bottom: 4px; }
+    .detail-list .entry .v { font-size: 13px; color: #344054; line-height: 1.55; }
+
+    /* Option C */
+    .c-layout { height: 100%; display: grid; grid-template-rows: auto 1fr; background: #fafbfc; }
+    .c-tabs { padding: 14px 18px 0; background: #fff; border-bottom: 1px solid var(--line-soft); }
+    .tab-line { display: flex; gap: 8px; }
+    .tab { border: 1px solid var(--line); background: #fff; border-bottom: 0; padding: 10px 14px; border-radius: 8px 8px 0 0; color: var(--muted); font-weight: 800; font-size: 13px; }
+    .tab.active { background: #fafbfc; color: var(--blue); border-color: #c7d2fe; }
+    .c-body { min-height: 0; overflow: hidden; display: grid; grid-template-columns: 1fr 420px; }
+    .c-list { min-height: 0; overflow: auto; padding: 16px; }
+    .c-inspector { min-height: 0; overflow: auto; background: #fff; border-left: 1px solid var(--line-soft); padding: 16px; }
+    .accordion { border: 1px solid var(--line); border-radius: 10px; background: #fff; margin-bottom: 12px; overflow: hidden; }
+    .accordion-head { padding: 14px 16px; display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; background: #fff; border-left: 4px solid var(--blue); }
+    .accordion-body { border-top: 1px solid var(--line-soft); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .kv { padding: 12px 14px; border-right: 1px solid #f3f4f6; border-bottom: 1px solid #f3f4f6; }
+    .kv .k { font-size: 12px; color: var(--muted); font-weight: 800; margin-bottom: 5px; }
+    .kv .v { font-size: 13px; color: #344054; line-height: 1.5; }
+    .source-card { border: 1px solid #dbe4ff; background: #f8faff; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    .source-card h4 { margin: 0 0 8px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="icon on">⌂</div>
+      <div class="icon">✓</div>
+      <div class="icon">▥</div>
+      <div class="icon">⌘</div>
+      <div style="flex:1"></div>
+      <div class="icon">G</div>
+    </aside>
+    <main class="main">
+      <div class="topbar">上传审核</div>
+      <div class="canvas">
+        <div class="hint">
+          <strong>试验计划核查弹窗 UX 方案</strong>
+          <span>基于现有 UI 视觉重画，下面三版可切换预览。</span>
+          <div class="seg">
+            <button class="active" data-target="opt-a">方案 A：测试项工作台</button>
+            <button data-target="opt-b">方案 B：矩阵表格</button>
+            <button data-target="opt-c">方案 C：分组折叠</button>
+          </div>
+        </div>
+
+        <section class="modal">
+          <header class="modal-head">
+            <div class="title">核查试验计划</div>
+            <span class="badge">AI 提取 · 置信度 ~0.88</span>
+            <span class="file">大冶-灯具准入实验标准（新.xlsx</span>
+            <button class="close">×</button>
+          </header>
+          <div class="stats">
+            <span class="stat"><b>35</b>测试项</span>
+            <span class="stat"><b>144</b>字段</span>
+            <span class="stat green"><b>18</b>已确认</span>
+            <span class="stat orange"><b>126</b>待确认</span>
+            <span class="stat red"><b>3</b>低置信</span>
+            <span class="mini muted" style="margin-left:auto">支持逐字段确认、批量确认、原文证据查看</span>
+          </div>
+
+          <div class="body">
+            <div id="opt-a" class="option a-layout">
+              <aside class="a-left">
+                <div class="search">搜索测试项 / 标准 / 判定要求</div>
+                <div class="group-title"><span>基础信息</span><span>2/2</span></div>
+                <div class="item">
+                  <div class="item-title">part_name</div>
+                  <div class="item-meta"><span class="dot ok"></span>灯类 <span class="pill ok">已确认</span></div>
+                </div>
+                <div class="group-title"><span>测试项总表</span><span>16/35</span></div>
+                <div class="item active">
+                  <div class="item-title">灯具的光电基本性能试验</div>
+                  <div class="item-meta"><span class="dot"></span>5 字段 · 3 待确认</div>
+                </div>
+                <div class="item">
+                  <div class="item-title">近光高度调节范围测量试验</div>
+                  <div class="item-meta"><span class="dot ok"></span>4 字段 · 已确认</div>
+                </div>
+                <div class="item">
+                  <div class="item-title">连续作动耐久试验</div>
+                  <div class="item-meta"><span class="dot"></span>5 字段 · 2 待确认</div>
+                </div>
+                <div class="item">
+                  <div class="item-title">防水试验 IPX4（可加严）</div>
+                  <div class="item-meta"><span class="dot"></span>5 字段 · 4 待确认</div>
+                </div>
+                <div class="group-title"><span>试验细则</span><span>0/35</span></div>
+                <div class="item">
+                  <div class="item-title">细则 1：光电性能</div>
+                  <div class="item-meta"><span class="dot"></span>8 条参数</div>
+                </div>
+              </aside>
+              <main class="a-mid">
+                <div class="detail-card">
+                  <h3>灯具的光电基本性能试验</h3>
+                  <div class="field-grid">
+                    <div class="label">测试项名称</div><div class="value">灯具的光电基本性能试验</div><div><span class="pill ok">已确认</span></div>
+                    <div class="label">是否执行</div><div class="value">Y</div><div><span class="pill pending">待确认</span></div>
+                    <div class="label">测试模式</div><div class="value subtle">未提供</div><div><span class="pill pending">待确认</span></div>
+                    <div class="label">标准依据</div><div class="value">GB19152-2025, GB 17510-2025</div><div><span class="pill pending">待确认</span></div>
+                    <div class="label">判定要求</div><div class="value">测试点符合法规 GB19152-2025、GB 17510-2025 要求、输出测光报告。</div><div><span class="pill pending">待确认</span></div>
+                  </div>
+                </div>
+                <div class="detail-card">
+                  <h3>试验细则</h3>
+                  <div class="field-grid" style="grid-template-columns: 150px 1fr 92px">
+                    <div class="label">参考文件</div><div class="value">GB 19152-2025, GB 17510-2025</div><div><span class="pill pending">待确认</span></div>
+                    <div class="label">样品状态</div><div class="value">常温状态，额定电压供电</div><div><span class="pill pending">待确认</span></div>
+                    <div class="label">输出物</div><div class="value">测光报告</div><div><span class="pill pending">待确认</span></div>
+                  </div>
+                </div>
+                <div class="evidence">
+                  <strong>原文证据</strong><br>
+                  测试项目：灯具的光电基本性能试验；标准依据：GB19152-2025、GB 17510-2025；判定要求：测试点符合法规要求，输出测光报告。
+                </div>
+              </main>
+              <aside class="a-right">
+                <div class="side-box">
+                  <h4>本测试项确认进度</h4>
+                  <div class="line"><span>已确认</span><b class="green">1</b></div>
+                  <div class="line"><span>待确认</span><b class="orange">4</b></div>
+                  <div class="line"><span>存疑</span><b>0</b></div>
+                </div>
+                <div class="side-box">
+                  <h4>建议操作</h4>
+                  <div class="line"><span>该测试项字段完整</span><span class="pill ok">可批量确认</span></div>
+                  <div class="line"><span>测试模式为空</span><span class="pill pending">可接受</span></div>
+                  <div class="line"><span>有原文证据</span><span class="pill ok">已定位</span></div>
+                </div>
+                <button class="btn primary" style="width:100%; margin-bottom:10px">确认当前测试项</button>
+                <button class="btn" style="width:100%">标记当前测试项存疑</button>
+              </aside>
+            </div>
+
+            <div id="opt-b" class="option b-layout hidden">
+              <aside class="b-left">
+                <div class="search">筛选：待确认 / 低置信 / 有标准依据</div>
+                <div class="category-card">
+                  <div class="cap"><span>基本信息</span><span class="mini subtle">2 字段</span></div>
+                  <div class="mini-item"><b>部件类型</b><br><span class="muted">灯类</span></div>
+                  <div class="mini-item"><b>供应商</b><br><span class="muted">广东大冶</span></div>
+                </div>
+                <div class="category-card">
+                  <div class="cap"><span>状态筛选</span><span class="mini subtle">126 待处理</span></div>
+                  <div class="mini-item"><span class="pill pending">待确认</span> 126 个字段</div>
+                  <div class="mini-item"><span class="pill warn">低置信</span> 3 个字段</div>
+                  <div class="mini-item"><span class="pill ok">已确认</span> 18 个字段</div>
+                </div>
+                <div class="category-card">
+                  <div class="cap"><span>字段筛选</span><span class="mini subtle">5 类</span></div>
+                  <div class="mini-item">测试项名称 · 35</div>
+                  <div class="mini-item">是否执行 · 35</div>
+                  <div class="mini-item">测试模式 · 4</div>
+                  <div class="mini-item">标准依据 · 12</div>
+                  <div class="mini-item">判定要求 · 35</div>
+                </div>
+              </aside>
+              <main class="b-main">
+                <div class="summary-strip">
+                  <div class="summary-cell"><div class="k">计划对象</div><div class="v">灯类</div></div>
+                  <div class="summary-cell"><div class="k">供应商</div><div class="v">广东大冶</div></div>
+                  <div class="summary-cell"><div class="k">测试项</div><div class="v">35 项</div></div>
+                  <div class="summary-cell"><div class="k">试验细则</div><div class="v">35 组</div></div>
+                </div>
+                <div class="matrix">
+                  <div class="matrix-row head">
+                    <div>测试项</div><div>执行</div><div>模式</div><div>标准依据</div><div>判定要求</div><div>状态</div>
+                  </div>
+                  <div class="matrix-row selected">
+                    <div><b>灯具的光电基本性能试验</b></div><div>Y</div><div class="subtle">未提供</div><div>GB19152-2025, GB 17510-2025</div><div>测试点符合法规要求、输出测光报告。</div><div><span class="pill pending">待确认</span></div>
+                  </div>
+                  <div class="matrix-row">
+                    <div><b>近光高度调节范围测量试验</b></div><div>Y</div><div class="subtle">未提供</div><div class="subtle">未提供</div><div>角度范围在 -4.07° 至 2.93° 之间</div><div><span class="pill ok">已确认</span></div>
+                  </div>
+                  <div class="matrix-row">
+                    <div><b>连续作动耐久试验</b></div><div>Y</div><div class="subtle">未提供</div><div class="subtle">未提供</div><div>测试后要求产品能正常工作，产品功能无不良现象。</div><div><span class="pill pending">待确认</span></div>
+                  </div>
+                  <div class="matrix-row">
+                    <div><b>灯罩内面起雾、消散试验（1）</b></div><div>Y</div><div class="subtle">未提供</div><div class="subtle">未提供</div><div>起雾在 20 分钟内完全消失。</div><div><span class="pill pending">待确认</span></div>
+                  </div>
+                  <div class="matrix-row">
+                    <div><b>防水试验 IPX4（可加严）</b></div><div>Y</div><div class="subtle">未提供</div><div>GB/T 30038</div><div>试验后最大发光强度值不应降低 10% 以上。</div><div><span class="pill warn">低置信</span></div>
+                  </div>
+                </div>
+                <div class="evidence" style="margin-top:14px">
+                  <strong>选中行证据：</strong>保留矩阵整体扫读，同时底部显示当前行原文；适合一次性核对大量测试项，批量选择后确认。
+                </div>
+              </main>
+              <aside class="b-right">
+                <div class="detail-list">
+                  <div class="cap">选中测试项详情</div>
+                  <div class="entry"><div class="k">测试项</div><div class="v">灯具的光电基本性能试验</div></div>
+                  <div class="entry"><div class="k">是否执行</div><div class="v">Y</div></div>
+                  <div class="entry"><div class="k">标准依据</div><div class="v">GB19152-2025, GB 17510-2025</div></div>
+                  <div class="entry"><div class="k">判定要求</div><div class="v">测试点符合法规 GB19152-2025、GB 17510-2025 要求、输出测光报告。</div></div>
+                </div>
+                <div class="detail-list">
+                  <div class="cap">试验细则</div>
+                  <div class="entry"><div class="k">参考文件</div><div class="v">GB 19152-2025, GB 17510-2025</div></div>
+                  <div class="entry"><div class="k">运行方式</div><div class="v">按额定电压供电，完成光电基本性能测试。</div></div>
+                  <div class="entry"><div class="k">输出物</div><div class="v">测光报告</div></div>
+                </div>
+                <div class="detail-list">
+                  <div class="cap">原文证据</div>
+                  <div class="entry"><div class="v">测试项目：灯具的光电基本性能试验；标准依据：GB19152-2025、GB 17510-2025；判定要求：测试点符合法规要求，输出测光报告。</div></div>
+                </div>
+                <button class="btn primary" style="width:100%; margin-bottom:10px">确认选中行全部字段</button>
+                <button class="btn" style="width:100%">仅确认当前字段</button>
+              </aside>
+            </div>
+
+            <div id="opt-c" class="option c-layout hidden">
+              <div class="c-tabs">
+                <div class="tab-line">
+                  <button class="tab active">全部测试项 35</button>
+                  <button class="tab">有标准依据 12</button>
+                  <button class="tab">缺测试模式 31</button>
+                  <button class="tab">低置信 3</button>
+                  <button class="tab">已确认 18</button>
+                </div>
+              </div>
+              <div class="c-body">
+                <main class="c-list">
+                  <div class="accordion">
+                    <div class="accordion-head">
+                      <div><b>灯具的光电基本性能试验</b><div class="mini subtle">5 个字段 · 3 个细则参数 · 有原文证据</div></div>
+                      <span class="pill pending">4 待确认</span>
+                      <button class="btn">展开</button>
+                    </div>
+                    <div class="accordion-body">
+                      <div class="kv"><div class="k">是否执行</div><div class="v">Y</div></div>
+                      <div class="kv"><div class="k">测试模式</div><div class="v subtle">未提供</div></div>
+                      <div class="kv"><div class="k">标准依据</div><div class="v">GB19152-2025, GB 17510-2025</div></div>
+                      <div class="kv"><div class="k">判定要求</div><div class="v">测试点符合法规要求、输出测光报告。</div></div>
+                    </div>
+                  </div>
+                  <div class="accordion">
+                    <div class="accordion-head">
+                      <div><b>近光高度调节范围测量试验</b><div class="mini subtle">4 个字段 · 已确认</div></div>
+                      <span class="pill ok">已确认</span>
+                      <button class="btn">展开</button>
+                    </div>
+                  </div>
+                  <div class="accordion">
+                    <div class="accordion-head">
+                      <div><b>防水试验 IPX4（可加严）</b><div class="mini subtle">5 个字段 · 1 个低置信字段</div></div>
+                      <span class="pill warn">低置信</span>
+                      <button class="btn">展开</button>
+                    </div>
+                  </div>
+                </main>
+                <aside class="c-inspector">
+                  <div class="source-card">
+                    <h4>当前选中字段</h4>
+                    <div class="mini subtle">灯具的光电基本性能试验 · 标准依据</div>
+                    <div style="font-size:18px; font-weight:800; margin-top:8px">GB19152-2025, GB 17510-2025</div>
+                  </div>
+                  <div class="source-card">
+                    <h4>原文证据</h4>
+                    <div class="mini muted" style="line-height:1.7">测试点符合法规 GB19152-2025、GB 17510-2025 要求、输出测光报告。</div>
+                  </div>
+                  <div class="source-card">
+                    <h4>字段操作</h4>
+                    <button class="btn primary" style="width:100%; margin-bottom:10px">确认字段</button>
+                    <button class="btn" style="width:100%">编辑字段</button>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+
+          <footer class="footer">
+            <span class="mini subtle">方案预览：只展示试验计划核查，不影响当前代码。选定后再合入 React 组件。</span>
+            <div class="row">
+              <button class="btn">关闭</button>
+              <button class="btn">仅保存</button>
+              <button class="btn warn">强制确认并保存</button>
+            </div>
+          </footer>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const buttons = document.querySelectorAll('.seg button');
+    const options = document.querySelectorAll('.option');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        buttons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        options.forEach(o => o.classList.add('hidden'));
+        document.getElementById(btn.dataset.target).classList.remove('hidden');
+      });
+    });
+  </script>
+</body>
+</html>

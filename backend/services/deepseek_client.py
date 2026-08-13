@@ -1,23 +1,20 @@
 import asyncio
+import hashlib
+from urllib.parse import urlparse
 import json
 import re
 import time
-from collections.abc import Iterator
 
 from openai import (
-    OpenAI,
+    AsyncOpenAI,
     APIConnectionError,
     APITimeoutError,
     InternalServerError,
     RateLimitError,
+    APIStatusError,
 )
-from bs4 import BeautifulSoup
-from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
-from services.prompts import (
-    SCAN_PROMPT, REVIEW_PROMPT,
-    MAX_CONTEXT_TOKENS, PROMPT_OVERHEAD_CHARS, estimate_tokens,
-    HIGH_KEYWORDS, MEDIUM_KEYWORDS,
-)
+from config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL, get_deepseek_base_url
+from services.cloud_json_process import call_cloud_json_process
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,13 +22,68 @@ logger = get_logger(__name__)
 MAX_RETRIES = 3
 BASE_DELAY_SEC = 2.0
 RETRYABLE = (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)
+JSON_OUTPUT_FORMAT = {"type": "json_object"}
+
+# HTTP status codes that indicate permanent (non-retryable) errors
+NON_RETRYABLE_STATUS = {401, 402, 403}
 
 
-def _parse_json(content: str, max_attempts: int = 3) -> dict:
-    """Parse JSON from LLM response, with aggressive tolerance for malformed output."""
+def _ensure_json_instruction(system_prompt: str, user_prompt: str) -> str:
+    """Ensure DeepSeek JSON Output requirements are satisfied.
+
+    DeepSeek requires either the system or user prompt to contain "json" when
+    response_format={"type": "json_object"} is used. Most project prompts
+    already include JSON examples; this fallback protects smaller focused calls.
+    """
+    combined = f"{system_prompt}\n{user_prompt}".lower()
+    if "json" in combined:
+        return system_prompt
+    return (
+        f"{system_prompt}\n\n"
+        "请仅输出合法 JSON 对象，不要输出 Markdown 或解释文本。"
+        "示例 JSON 输出：{\"issues\": []}"
+    )
+
+
+def _is_billing_or_auth_error(exc: Exception) -> str | None:
+    """Return a Chinese description if *exc* is a billing/auth error, else None."""
+    if isinstance(exc, APIStatusError):
+        if exc.status_code == 401:
+            return f"API 认证失败 (401) —— 请检查 DEEPSEEK_API_KEY 是否正确"
+        if exc.status_code == 402:
+            return f"API 余额不足 (402) —— 请充值 DeepSeek 账户或切换到免费模型"
+        if exc.status_code == 403:
+            return f"API 权限不足 (403) —— 请检查 API Key 权限"
+    # Also check for status_code attribute on other exception types
+    sc = getattr(exc, 'status_code', None)
+    if sc == 401:
+        return f"API 认证失败 (401)"
+    if sc == 402:
+        return f"API 余额不足 (402)"
+    if sc == 403:
+        return f"API 权限不足 (403)"
+    return None
+
+
+def _parse_json(content: str, max_attempts: int = 4, context: dict | None = None) -> dict:
+    """Parse JSON from LLM response, with aggressive tolerance for malformed output.
+
+    Repair attempts are ordered from least-destructive to most-destructive:
+    1. Balance braces/brackets (structural fix, no content change)
+    2. Close unterminated strings at end (truncation fix)
+    3. Fix missing commas between adjacent tokens (content-safe)
+    4. Backward truncation scan (last resort, may lose data)
+
+    Args:
+        context: optional dict with stage/pass_name for log correlation.
+    """
+    ctx = context or {}
     content = content.strip()
     if not content:
+        logger.warning("JSON_PARSE empty input", **ctx)
         return {}
+
+    original_len = len(content)
 
     # Strip markdown fences
     if content.startswith("```"):
@@ -52,6 +104,9 @@ def _parse_json(content: str, max_attempts: int = 3) -> dict:
     # Remove trailing commas before ] or }
     content = re.sub(r',(\s*[}\]])', r'\1', content)
 
+    # Remove Unicode BOM and zero-width spaces
+    content = content.replace('﻿', '').replace('​', '')
+
     # Find the outermost { } or [ ] block
     start = content.find('{')
     if start == -1:
@@ -63,344 +118,390 @@ def _parse_json(content: str, max_attempts: int = 3) -> dict:
     # Try parsing with increasing levels of repair
     for attempt in range(max_attempts):
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            logger.debug("JSON_PARSE success attempt=%d result_keys=%d",
+                        attempt + 1, len(result) if isinstance(result, dict) else len(result))
+            return result
         except json.JSONDecodeError as e:
-            logger.warning("JSON_PARSE attempt=%d error=%s pos=%d", attempt + 1, e.msg, e.pos)
+            logger.warning("JSON_PARSE attempt=%d error=%s pos=%d len=%d",
+                          attempt + 1, e.msg, e.pos, len(content))
             if attempt == 0:
-                # Fix: missing commas between adjacent values
-                content = re.sub(r'"\s+"', '", "', content)
+                # Level 1: Balance braces/brackets only (non-destructive)
+                open_braces = content.count('{') - content.count('}')
+                open_brackets = content.count('[') - content.count(']')
+                if open_braces > 0 or open_brackets > 0:
+                    closers = ']' * max(0, open_brackets) + '}' * max(0, open_braces)
+                    content = content + closers
+                    logger.debug("JSON_PARSE balanced braces=%d brackets=%d",
+                                open_braces, open_brackets)
+            elif attempt == 1:
+                # Level 2: Close unterminated string at end (truncation)
+                # Pattern: "key": "value  →  "key": "value"
+                content = re.sub(r'(:\s*"[^"]*)$', r'\1"', content)
+                # Also fix dangling string values: "val"\n"key" → "val",\n"key"
+                content = re.sub(r'"\s*\n\s*"', '",\n"', content)
+                # Balance braces again after string fix
+                ob = content.count('{') - content.count('}')
+                obr = content.count('[') - content.count(']')
+                if ob > 0 or obr > 0:
+                    content = content + ']' * max(0, obr) + '}' * max(0, ob)
+            elif attempt == 2:
+                # Level 3: Fix missing commas between adjacent JSON tokens
+                content = re.sub(r'"\s+(?=")', '", "', content)
                 content = re.sub(r']\s+\[', '], [', content)
                 content = re.sub(r'}\s+{', '}, {', content)
                 content = re.sub(r'"\s+{', '", {', content)
                 content = re.sub(r']\s+"', '], "', content)
-            elif attempt == 1:
-                # Fix: unescaped newlines inside quoted strings
-                content = re.sub(r'(?<=[^\\])\n', r'\\n', content)
+                content = re.sub(r'(\d)\s+(\d)', r'\1, \2', content)  # adjacent numbers
+                content = re.sub(r'(\d)\s+(?=")', r'\1, ', content)  # number before string
+                # Fix trailing commas we may have introduced
+                content = re.sub(r',(\s*[}\]])', r'\1', content)
+                # Balance braces again
+                ob = content.count('{') - content.count('}')
+                obr = content.count('[') - content.count(']')
+                if ob > 0 or obr > 0:
+                    content = content + ']' * max(0, obr) + '}' * max(0, ob)
             else:
-                # Fix: try to parse the longest valid prefix
-                for pos in range(len(content) - 1, max(e.pos - 100, 0), -1):
+                # Level 4: Backward truncation scan — find longest valid JSON prefix
+                scan_start = min(len(content) - 1, e.pos + 500)
+                for pos in range(scan_start, max(e.pos - 200, 0), -1):
+                    prefix = content[:pos].rstrip()
+                    if prefix.endswith('"'):
+                        pass  # string naturally ended
+                    elif prefix.endswith(',') or prefix.endswith(':') or prefix.endswith('[') or prefix.endswith('{'):
+                        prefix = prefix.rstrip(',: \t')
+                    else:
+                        last_quote = prefix.rfind('"')
+                        second_last = prefix.rfind('"', 0, last_quote) if last_quote > 0 else -1
+                        if last_quote > second_last:
+                            prefix = prefix + '"'
+                    ob = prefix.count('{') - prefix.count('}')
+                    obr = prefix.count('[') - prefix.count(']')
+                    prefix = prefix + ']' * max(0, obr) + '}' * max(0, ob)
                     try:
-                        return json.loads(content[:pos] + '}')
+                        result = json.loads(prefix)
+                        logger.warning("JSON_PARSE recovered via truncation pos=%d prefix_len=%d",
+                                      pos, len(prefix))
+                        return result
                     except Exception:
                         continue
 
-    logger.error("JSON_PARSE_FAILED after %d attempts, returning {}", max_attempts)
+    logger.error(
+        "JSON_PARSE_FAILED attempts=%d original_len=%d final_len=%d content_sha256=%s",
+        max_attempts, original_len, len(content),
+        hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()[:16], **ctx,
+    )
     return {}
 
 
-def _priority(heading: str, content_head: str) -> str:
-    """Classify a section as high/medium/low based on keyword matching."""
-    text = (heading + " " + content_head[:200]).lower()
-    for kw in HIGH_KEYWORDS:
-        if kw in text:
-            return "high"
-    for kw in MEDIUM_KEYWORDS:
-        if kw in text:
-            return "medium"
-    return "low"
+def _parse_complete_json_object(content: str) -> tuple[dict, bool]:
+    """Parse one complete JSON object without structural repair.
 
-
-def extract_classify_sections(html_content: str, plain_text: str) -> list[dict]:
-    """Split report into sections by HTML headings, classify each by priority.
-    Returns [{heading, priority, text, skipped}], ordered by document position."""
-    soup = BeautifulSoup(html_content, "lxml")
-    headings = soup.find_all(["h1", "h2", "h3", "h4"])
-
-    if not headings:
-        return [{"heading": "全文", "priority": "high", "text": plain_text, "skipped": False}]
-
-    sections = []
-    # Extract the leading content before first heading
-    first_heading = headings[0]
-    lead_text = ""
-    for sibling in first_heading.find_all_previous():
-        if sibling.name in ("h1", "h2", "h3", "h4"):
-            break
-        lead_text = sibling.get_text() + "\n" + lead_text
-    if lead_text.strip():
-        sections.append({
-            "heading": "报告首页",
-            "priority": _priority("报告首页", lead_text),
-            "text": lead_text.strip(),
-            "skipped": False,
-        })
-
-    for h in headings:
-        heading_text = h.get_text().strip()
-        if not heading_text or len(heading_text) > 200:
-            continue
-
-        body_parts = []
-        for sibling in h.find_next_siblings():
-            if sibling.name in ("h1", "h2", "h3", "h4"):
-                break
-            body_parts.append(sibling.get_text())
-        body = "\n".join(body_parts).strip()
-        body = re.sub(r'\n{3,}', '\n\n', body)
-
-        section_text = f"{heading_text}\n{body}" if body else heading_text
-
-        sections.append({
-            "heading": heading_text,
-            "priority": _priority(heading_text, body),
-            "text": section_text,
-            "skipped": False,
-        })
-
-    return sections
-
-
-def build_filtered_text(sections: list[dict], token_limit: int) -> tuple[str, list[str]]:
-    """Build review text from sections: high=full, medium=heading+500chars, low=skip.
-    Returns (filtered_text, list_of_skipped_headings)."""
-    parts = []
-    skipped = []
-
-    for sec in sections:
-        if sec["priority"] == "high":
-            parts.append(sec["text"])
-            sec["skipped"] = False
-        elif sec["priority"] == "medium":
-            short = sec["text"][:len(sec["heading"]) + 500]
-            parts.append(short)
-            sec["skipped"] = False
-        else:
-            sec["skipped"] = True
-            skipped.append(sec["heading"])
-
-    # Ensure combined text fits within token limit
-    combined = "\n\n".join(parts)
-    while estimate_tokens(combined) > token_limit and parts:
-        # Drop medium sections first, then shortest high sections
-        dropped = None
-        for i in range(len(parts) - 1, -1, -1):
-            for sec in sections:
-                if sec.get("skipped"):
-                    continue
-                if sec["priority"] == "medium" and sec["text"] in parts[i]:
-                    dropped = sec
-                    break
-            if dropped:
-                break
-        if not dropped:
-            # Drop shortest high section
-            high_secs = [(s, s["text"]) for s in sections if s["priority"] == "high" and not s["skipped"]]
-            if high_secs:
-                dropped = min(high_secs, key=lambda x: len(x[1]))
-                dropped = dropped[0]
-        if dropped:
-            parts = [p for p in parts if dropped["text"] not in p]
-            dropped["skipped"] = True
-            skipped.append(dropped["heading"])
-        else:
-            break
-
-    return "\n\n".join(parts), skipped
-
-
-def prepare_review_text(plain_text: str, toc: str, html_content: str) -> tuple[str, list[str], int, int]:
-    """Token estimation + section priority filtering (shared by blocking & streaming paths).
-
-    Returns (review_text, skipped_sections, estimated_tokens, token_limit).
-    If the report fits in context, skipped_sections is empty and review_text == plain_text.
+    Markdown fences are tolerated for compatibility, but truncated objects,
+    trailing prose, and top-level arrays are rejected so callers never accept a
+    repaired prefix as a complete extraction/audit result.
     """
-    estimated = estimate_tokens(plain_text + toc) + int(PROMPT_OVERHEAD_CHARS / 1.8)
-    token_limit = MAX_CONTEXT_TOKENS
-    skipped_sections: list[str] = []
-    review_text = plain_text
-
-    if estimated > token_limit:
-        sections = extract_classify_sections(html_content, plain_text)
-        safe_limit = token_limit - int(PROMPT_OVERHEAD_CHARS / 1.8) - 500
-        review_text, skipped_sections = build_filtered_text(sections, safe_limit)
-        if review_text.strip():
-            estimated = estimate_tokens(review_text + toc) + int(PROMPT_OVERHEAD_CHARS / 1.8)
-
-    return review_text, skipped_sections, estimated, token_limit
+    text = (content or "").strip()
+    fenced = False
+    if text.startswith("```"):
+        fenced = True
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        result = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return {}, fenced
+    return (result, fenced) if isinstance(result, dict) else ({}, fenced)
 
 
 class DeepSeekReviewer:
 
-    def __init__(self):
-        self.client = OpenAI(
-            api_key=DEEPSEEK_API_KEY,
-            base_url=DEEPSEEK_BASE_URL,
+    def __init__(self, *, api_key: str | None = None, base_url: str | None = None):
+        """Create one JSON-output model client.
+
+        The default remains the runtime-configured DeepSeek endpoint. The
+        unified engine may provide an explicit OpenAI-compatible local endpoint; explicit clients
+        are pinned and are never silently reconfigured to the cloud endpoint.
+        """
+        self._runtime_configured = base_url is None
+        self._api_key = DEEPSEEK_API_KEY if api_key is None else api_key
+        self._base_url = base_url or get_deepseek_base_url()
+        self.client = AsyncOpenAI(
+            api_key=self._api_key or "local-no-key",
+            base_url=self._base_url,
+            max_retries=0,
         )
 
-    async def review_report(self, plain_text: str, toc: str = "",
-                            html_content: str = "",
-                            user_rules: str = "",
-                            standard_limits: str = "") -> dict:
-        if not plain_text.strip():
-            return {"overall_result": "error", "review_items": [], "summary": "无内容可审核"}
+    def _ensure_endpoint_credentials(self) -> None:
+        """Require credentials only when the official cloud endpoint is used.
 
-        review_text, skipped_sections, estimated, token_limit = \
-            prepare_review_text(plain_text, toc, html_content)
+        Application startup and explicit local OpenAI-compatible endpoints must
+        work without a DeepSeek key.  The legacy/cloud path still fails before
+        any request leaves the process and returns an actionable error.
+        """
+        hostname = (urlparse(self._base_url).hostname or "").lower()
+        if hostname in {"api.deepseek.com", "api-docs.deepseek.com"} and not self._api_key:
+            raise RuntimeError(
+                "DeepSeek 云端模型未配置 DEEPSEEK_API_KEY；"
+                "请配置密钥，或为统一审核引擎配置本地文本模型端点。"
+            )
 
-        if not review_text.strip():
-            if not html_content:
-                summary = "报告过长且无法按章节过滤（缺少HTML），请上传Word/PDF格式"
-            else:
-                summary = "报告内容无法提取有效审核章节"
-            return {
-                "overall_result": "error", "review_items": [], "summary": summary,
-                "estimated_tokens": estimated, "token_limit": token_limit, "truncated": True,
-            }
-
-        # ── Stage 1: coarse scan ──
-        scan_prompt = SCAN_PROMPT.format(report_content=review_text, toc=toc, user_rules=user_rules)
-
-        try:
-            checklist = await self._call_api(scan_prompt, "stage1", timeout=180)
-        except Exception as e:
-            return {"overall_result": "error", "review_items": [],
-                    "summary": f"第一轮扫描失败: {str(e)}"}
-
-        items = checklist.get("checklist", [])
-        if not items:
-            skip_note = ""
-            if skipped_sections:
-                skip_note = f"。注意：以下低优先级章节未审核——{', '.join(skipped_sections[:8])}"
-            return {
-                "overall_result": "pass",
-                "review_items": [],
-                "summary": "未发现疑似问题" + skip_note,
-                "estimated_tokens": estimated,
-                "token_limit": token_limit,
-                "truncated": False,
-            }
-
-        # ── Stage 2: detailed review ──
-        checklist_json = json.dumps(items, ensure_ascii=False, indent=2)
-        review_prompt = REVIEW_PROMPT.format(
-            report_content=review_text, toc=toc, checklist=checklist_json,
-            user_rules=user_rules, standard_limits=standard_limits,
+    def _refresh_client_config(self) -> None:
+        """Apply runtime API endpoint changes without restarting the service."""
+        if not self._runtime_configured:
+            return
+        base_url = get_deepseek_base_url()
+        if base_url == self._base_url:
+            return
+        self._base_url = base_url
+        self.client = AsyncOpenAI(
+            api_key=self._api_key or "local-no-key",
+            base_url=base_url,
+            max_retries=0,
         )
+        logger.info("deepseek_client_reconfigured", base_url_host=urlparse(base_url).netloc)
 
-        try:
-            result = await self._call_api(review_prompt, "stage2", timeout=300)
-        except Exception as e:
-            return {"overall_result": "error", "review_items": [],
-                    "summary": f"第二轮深度审核失败: {str(e)}"}
+    async def _call_api(self, prompt: str | list[dict], stage: str, timeout: int,
+                        system_prompt: str | None = None,
+                        max_tokens: int | None = None,
+                        model: str | None = None,
+                        temperature: float = 0,
+                        thinking: bool | None = None,
+                        user_id: str | None = None,
+                        reasoning_effort: str | None = None,
+                        task_kind: str | None = None,
+                        require_complete_json: bool = True,
+                        provider_extras: bool = True,
+                        max_retries: int | None = None,
+                        isolate_cloud: bool = True) -> dict:
+        """Shared AI API call with retry, JSON parse, and error classification.
 
-        if skipped_sections:
-            result["summary"] = (result.get("summary", "") +
-                                 f"。注意：以下低优先级章节因超限未审核——{', '.join(skipped_sections[:8])}")
+        Args:
+            prompt: User message content (required).
+            stage: Logging identifier (required).
+            timeout: Request timeout in seconds (required).
+            system_prompt: System message. Defaults to EMC reviewer persona.
+            max_tokens: Max output tokens. None = model default.
+            model: Model override. None = DEEPSEEK_MODEL from config.
+            temperature: Sampling temperature (default 0 = deterministic).
+            thinking: Explicitly enable/disable DeepSeek thinking mode.  None
+                preserves the provider/model default.
+            user_id: Optional stable, non-sensitive DeepSeek isolation key.
+            reasoning_effort: Thinking strength (currently high/max).
+            task_kind: Central policy key.  Explicit model/thinking arguments
+                override the policy when a call has a documented exception.
+            require_complete_json: Reject truncated/repaired JSON by default.
+            max_retries: Optional per-call retry cap. None uses the global
+                default; bounded batch jobs can fail fast and recover at the
+                business-unit level instead of multiplying long requests.
 
-        result["estimated_tokens"] = estimated
-        result["token_limit"] = token_limit
-        result["truncated"] = bool(skipped_sections)
-        return result
+        Returns:
+            Parsed JSON dict. Empty dict if all retries exhausted on transient errors.
+            Raises immediately on billing/auth errors (401/402/403).
+        """
+        if system_prompt is None:
+            system_prompt = "你是EMC检测报告审核专家，严格按JSON格式输出审核结果。"
+        prompt_text = prompt if isinstance(prompt, str) else "\n".join(
+            str(part.get("text", "")) for part in prompt if part.get("type") == "text"
+        )
+        system_prompt = _ensure_json_instruction(system_prompt, prompt_text)
+        if task_kind:
+            from services.llm_policy import get_llm_policy
+            policy = get_llm_policy(task_kind)
+            if model is None:
+                model = policy.model
+            if thinking is None:
+                thinking = policy.thinking
+            if reasoning_effort is None:
+                reasoning_effort = policy.reasoning_effort
+        if model is None:
+            model = DEEPSEEK_MODEL
 
-    async def compare_reviews(self, old_items: list[dict], new_items: list[dict]) -> dict:
-        old_summary = json.dumps([
-            {"idx": i, "severity": it.get("severity",""), "location": it.get("location",""),
-             "original_text": it.get("original_text","")[:200], "error_description": it.get("error_description","")[:200]}
-            for i, it in enumerate(old_items)
-        ], ensure_ascii=False)
-        new_summary = json.dumps([
-            {"idx": i, "severity": it.get("severity",""), "location": it.get("location",""),
-             "original_text": it.get("original_text","")[:200], "error_description": it.get("error_description","")[:200]}
-            for i, it in enumerate(new_items)
-        ], ensure_ascii=False)
+        self._refresh_client_config()
+        self._ensure_endpoint_credentials()
 
-        prompt = f"""你是EMC检测报告审核专家。请对比同一份报告的旧版本审核结果和新版本审核结果。
-
-旧版本审核结果（{len(old_items)}项）：
-{old_summary}
-
-新版本审核结果（{len(new_items)}项）：
-{new_summary}
-
-请判断每一项的状态：
-- "fixed": 旧版本的问题在新版本中已修复
-- "persistent": 旧版本的问题在新版本中仍然存在
-- "new": 新版本中发现的新问题
-
-返回JSON格式：
-{{"items": [{{"old_idx": 数字或null, "new_idx": 数字或null, "status": "fixed"|"new"|"persistent"}}]}}"""
-        resp = await self._call_api(prompt, "compare", 120)
-        content = resp.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-        return _parse_json(content)
-
-    async def _call_api(self, prompt: str, stage: str, timeout: int) -> dict:
+        retry_limit = MAX_RETRIES if max_retries is None else max(
+            0, min(MAX_RETRIES, int(max_retries)),
+        )
+        endpoint_host = (urlparse(self._base_url).hostname or "").lower()
+        use_process_boundary = (
+            isolate_cloud
+            and endpoint_host in {"api.deepseek.com", "api-docs.deepseek.com"}
+            and isinstance(self.client, AsyncOpenAI)
+        )
+        if use_process_boundary:
+            last_process_exc: Exception | None = None
+            for attempt in range(1, retry_limit + 2):
+                call_t0 = time.time()
+                try:
+                    result = await call_cloud_json_process({
+                        "api_key": self._api_key,
+                        "base_url": self._base_url,
+                        "model": model,
+                        "task_kind": task_kind or "structured_extraction",
+                        "system_prompt": system_prompt,
+                        "user_prompt": prompt,
+                        "stage": stage,
+                        "timeout": timeout,
+                        "max_tokens": max_tokens or 16000,
+                        "temperature": temperature,
+                        "thinking": thinking,
+                        "user_id": user_id,
+                        "reasoning_effort": reasoning_effort,
+                        "require_complete_json": require_complete_json,
+                        "provider_extras": provider_extras,
+                    }, timeout=timeout, stage=stage, model=model)
+                    logger.info(
+                        "deepseek_process_response_summary",
+                        stage=stage,
+                        model=model,
+                        attempt=attempt,
+                        elapsed_ms=round((time.time() - call_t0) * 1000),
+                        parse_status="ok" if result else "empty",
+                        top_level_keys=sorted(result.keys())[:20],
+                        task_kind=task_kind,
+                    )
+                    if result or attempt > retry_limit:
+                        return result
+                except Exception as exc:
+                    last_process_exc = exc
+                    logger.warning(
+                        "deepseek_process_attempt_failed",
+                        stage=stage,
+                        model=model,
+                        attempt=attempt,
+                        retry_limit=retry_limit,
+                        error_type=type(exc).__name__,
+                    )
+                    if attempt > retry_limit:
+                        raise
+                await asyncio.sleep(BASE_DELAY_SEC * (2 ** (attempt - 1)))
+            if last_process_exc:
+                raise last_process_exc
+            return {}
         last_exc = None
-        for attempt in range(1, MAX_RETRIES + 2):  # 4 total: 1 initial + 3 retries
+        for attempt in range(1, retry_limit + 2):
+            call_t0 = time.time()
             try:
-                response = self.client.chat.completions.create(
-                    model="deepseek-chat",
+                kwargs: dict = dict(
+                    model=model,
                     messages=[
-                        {"role": "system", "content": "你是EMC检测报告审核专家，严格按JSON格式输出审核结果。"},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    temperature=0,
                     timeout=timeout,
+                    response_format=JSON_OUTPUT_FORMAT,
                 )
+                if thinking is not True:
+                    kwargs["temperature"] = temperature
+                if provider_extras and thinking is True and reasoning_effort:
+                    kwargs["reasoning_effort"] = reasoning_effort
+                if max_tokens is not None:
+                    kwargs["max_tokens"] = max_tokens
+                extra_body: dict = {}
+                if provider_extras and thinking is not None:
+                    extra_body["thinking"] = {"type": "enabled" if thinking else "disabled"}
+                if provider_extras and user_id:
+                    extra_body["user_id"] = user_id
+                if extra_body:
+                    kwargs["extra_body"] = extra_body
+                response = await self.client.chat.completions.create(**kwargs)
                 content = response.choices[0].message.content
-                return _parse_json(content)
+                if not content:
+                    logger.info(
+                        "llm_extract_response_summary",
+                        stage=stage,
+                        model=model,
+                        max_tokens=max_tokens,
+                        elapsed_ms=round((time.time() - call_t0) * 1000),
+                        empty_content=True,
+                        parse_repair=False,
+                        top_level_keys=[],
+                        attempt=attempt,
+                        thinking=thinking,
+                        reasoning_effort=reasoning_effort,
+                        task_kind=task_kind,
+                    )
+                    logger.warning("ai_empty_response", stage=stage, attempt=attempt)
+                    if attempt <= retry_limit:
+                        await asyncio.sleep(BASE_DELAY_SEC * (2 ** (attempt - 1)))
+                        continue
+                    return {}
+                # Log response metadata, never customer or copyrighted source text.
+                content_len = len(content)
+                usage = getattr(response, "usage", None)
+                cache_hit_tokens = getattr(usage, "prompt_cache_hit_tokens", None)
+                cache_miss_tokens = getattr(usage, "prompt_cache_miss_tokens", None)
+                logger.info(
+                    "ai_call",
+                    stage=stage,
+                    attempt=attempt,
+                    content_len=content_len,
+                    model=model,
+                    thinking=thinking,
+                    reasoning_effort=reasoning_effort,
+                    task_kind=task_kind,
+                    prompt_tokens=getattr(usage, "prompt_tokens", None),
+                    completion_tokens=getattr(usage, "completion_tokens", None),
+                    prompt_cache_hit_tokens=cache_hit_tokens,
+                    prompt_cache_miss_tokens=cache_miss_tokens,
+                )
+                logger.debug("ai_raw_response", stage=stage, attempt=attempt,
+                           content_len=content_len,
+                           content_sha256=hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()[:16])
+                if require_complete_json:
+                    result, parse_repair = _parse_complete_json_object(content)
+                else:
+                    result = _parse_json(content, context={"stage": stage, "attempt": attempt})
+                    parse_repair = not content.strip().startswith("{")
+                parse_success = bool(result)
+                logger.info(
+                    "llm_extract_response_summary",
+                    stage=stage,
+                    model=model,
+                    max_tokens=max_tokens,
+                    elapsed_ms=round((time.time() - call_t0) * 1000),
+                    empty_content=False,
+                    parse_repair=parse_repair,
+                    top_level_keys=sorted(result.keys())[:20] if isinstance(result, dict) else [],
+                    attempt=attempt,
+                    parse_status="ok" if parse_success else "failed",
+                    content_len=content_len,
+                    thinking=thinking,
+                    reasoning_effort=reasoning_effort,
+                    task_kind=task_kind,
+                    prompt_cache_hit_tokens=cache_hit_tokens,
+                    prompt_cache_miss_tokens=cache_miss_tokens,
+                )
+                if not parse_success and attempt <= retry_limit:
+                    logger.warning("ai_empty_parse_retry", stage=stage, attempt=attempt,
+                                  content_len=content_len,
+                                  content_sha256=hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()[:16])
+                    await asyncio.sleep(BASE_DELAY_SEC * (2 ** (attempt - 1)))
+                    continue
+                if not parse_success:
+                    logger.error("ai_parse_failed_final", stage=stage, attempt=attempt,
+                               content_len=content_len)
+                return result
             except RETRYABLE as e:
                 last_exc = e
-                if attempt <= MAX_RETRIES:
+                if attempt <= retry_limit:
                     delay = BASE_DELAY_SEC * (2 ** (attempt - 1))  # 2, 4, 8
                     logger.warning(
                         "API_RETRY stage=%s attempt=%d/%d delay=%.0fs error=%s",
-                        stage, attempt, MAX_RETRIES, delay, str(e)[:200],
+                        stage, attempt, retry_limit, delay, str(e)[:200],
                     )
-                    await asyncio_sleep(delay)
+                    await asyncio.sleep(delay)
             except Exception as e:
-                # Non-retryable (auth, bad request) — fail immediately
-                logger.error("API_FATAL stage=%s error=%s", stage, str(e))
+                billing_msg = _is_billing_or_auth_error(e)
+                if billing_msg:
+                    logger.error("API_FATAL stage=%s error=%s", stage, billing_msg)
+                else:
+                    logger.error("API_FATAL stage=%s error=%s", stage, str(e)[:300])
                 raise
-        logger.error("API_EXHAUSTED stage=%s retries=%d", stage, MAX_RETRIES)
-        # type: ignore[misc] — last_exc is guaranteed set here because the loop only
-        # exits via the except branch (which assigns last_exc) or this final raise.
+        logger.error("API_EXHAUSTED stage=%s retries=%d", stage, retry_limit)
         raise last_exc  # type: ignore[misc]
-
-    def stream_stage1(self, prompt: str) -> Iterator[str]:
-        """Stream DeepSeek API response for Stage 1 (coarse scan).
-        Yields content delta strings from the streaming response."""
-        return self._stream_api(prompt, "stage1", timeout=180)
-
-    def stream_stage2(self, prompt: str) -> Iterator[str]:
-        """Stream DeepSeek API response for Stage 2 (detailed review).
-        Yields content delta strings from the streaming response."""
-        return self._stream_api(prompt, "stage2", timeout=300)
-
-    def _stream_api(self, prompt: str, stage: str, timeout: int) -> Iterator[str]:
-        last_exc = None
-        for attempt in range(1, MAX_RETRIES + 2):
-            try:
-                response = self.client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": "你是EMC检测报告审核专家，严格按JSON格式输出审核结果。"},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0,
-                    timeout=timeout,
-                    stream=True,
-                )
-                for chunk in response:
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
-                return  # success — exit retry loop
-            except RETRYABLE as e:
-                last_exc = e
-                if attempt <= MAX_RETRIES:
-                    delay = BASE_DELAY_SEC * (2 ** (attempt - 1))
-                    logger.warning(
-                        "API_STREAM_RETRY stage=%s attempt=%d/%d delay=%.0fs error=%s",
-                        stage, attempt, MAX_RETRIES, delay, str(e)[:200],
-                    )
-                    time.sleep(delay)
-            except Exception as e:
-                logger.error("API_STREAM_FATAL stage=%s error=%s", stage, str(e))
-                raise
-        logger.error("API_STREAM_EXHAUSTED stage=%s retries=%d", stage, MAX_RETRIES)
-        # type: ignore[misc] — last_exc is guaranteed set here because the loop only
-        # exits via the except branch (which assigns last_exc) or this final raise.
-        raise last_exc  # type: ignore[misc]
-
-
-async def asyncio_sleep(seconds: float):
-    await asyncio.sleep(seconds)

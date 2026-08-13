@@ -1,31 +1,31 @@
-import { useState, useCallback, useEffect } from 'react'
-import ReportUploader from './components/ReportUploader'
-import ReportReviewer from './components/ReportReviewer'
-import ReportHistory from './components/ReportHistory'
-import BatchReviewer from './components/BatchReviewer'
-import StatsDashboard from './components/StatsDashboard'
-import ReportComparison from './components/ReportComparison'
-import RulesManager from './components/RulesManager'
-import StandardsBrowser from './components/StandardsBrowser'
-import ProjectGroups from './components/ProjectGroups'
+import { lazy, Suspense, useState, useEffect } from 'react'
 import LoginPage from './components/LoginPage'
 import ErrorBoundary from './components/ErrorBoundary'
-import { getCurrentUser, getStoredToken, clearStoredToken } from './api'
-import type { UploadResponse, BatchFileResult, User } from './types'
+import DocumentSetUploader from './components/DocumentSetUploader'
+import ReviewTaskWorkbench from './components/ReviewTaskWorkbench'
+import Icon from './components/Icons'
+import { getCurrentUser, getStoredToken, clearStoredToken, createDocumentSetRevision } from './api'
+import type { User } from './types'
 
-type View = 'upload' | 'config' | 'standards' | 'groups' | 'dashboard' | 'my_reports'
+const StatsDashboard = lazy(() => import('./components/StatsDashboard'))
+const StandardsBrowser = lazy(() => import('./components/StandardsBrowser'))
+const ProjectGroups = lazy(() => import('./components/ProjectGroups'))
+const UserManagement = lazy(() => import('./components/UserManagement'))
+const SystemOperations = lazy(() => import('./components/SystemOperations'))
+
+type View = 'workbench' | 'standards' | 'groups' | 'dashboard' | 'users' | 'operations'
 
 const ICONS: Record<View, JSX.Element> = {
-  upload: <svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="2" width="16" height="16" rx="2" fill="currentColor" opacity=".15"/><polyline points="16 10 12 6 8 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="6" x2="12" y2="15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>,
-  config: <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="9" cy="9" r="3" fill="currentColor" opacity=".25"/><circle cx="16" cy="9" r="2.5" fill="currentColor" opacity=".45"/><circle cx="12" cy="16" r="4" fill="currentColor" opacity=".7"/></svg>,
+  workbench: <svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="4" width="18" height="16" rx="3" fill="currentColor" opacity=".14"/><path d="M7 9h10M7 13h6M7 17h4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>,
   standards: <svg viewBox="0 0 24 24" width="20" height="20"><rect x="5" y="3" width="14" height="18" rx="2" fill="currentColor" opacity=".12" stroke="currentColor" strokeWidth="1.5"/><line x1="9" y1="8" x2="15" y2="8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><line x1="9" y1="12" x2="13" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
   groups: <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="8" cy="7" r="3.5" fill="currentColor" opacity=".3"/><circle cx="16" cy="7" r="2.5" fill="currentColor" opacity=".55"/><path d="M2 20v-1a5 5 0 015-5h2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M16 14h2.5a5 5 0 015 5v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
   dashboard: <svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="14" width="4" height="7" rx="1" fill="currentColor" opacity=".3"/><rect x="10" y="9" width="4" height="12" rx="1" fill="currentColor" opacity=".55"/><rect x="17" y="4" width="4" height="17" rx="1" fill="currentColor"/></svg>,
-  my_reports: <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6c0-1.1.9-2 2-2z" fill="currentColor" opacity=".12" stroke="currentColor" strokeWidth="1.5"/><polyline points="9 12 11 14 15 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  users: <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="9" cy="8" r="3" fill="currentColor" opacity=".25"/><path d="M3 20v-1a6 6 0 0112 0v1M17 8h4M19 6v4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
+  operations: <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="12" cy="12" r="4" fill="currentColor" opacity=".2"/></svg>,
 }
 
 const TITLES: Record<View, string> = {
-  upload: '上传审核', config: '审核配置', standards: '标准库', groups: '项目组', dashboard: '统计仪表盘', my_reports: '我的报告',
+  workbench: '审核任务', standards: '标准库', groups: '项目组', dashboard: '运行分析', users: '用户权限', operations: '系统运维',
 }
 
 export default function App() {
@@ -33,13 +33,12 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [activeView, setActiveView] = useState<View>(() => {
     const stored = localStorage.getItem('emc_last_view')
-    return (stored as View) || 'upload'
+    const valid: View[] = ['workbench', 'standards', 'groups', 'dashboard', 'users', 'operations']
+    return valid.includes(stored as View) ? stored as View : 'workbench'
   })
-  const [result, setResult] = useState<UploadResponse | null>(null)
-  const [batchResults, setBatchResults] = useState<BatchFileResult[] | null>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [compareIds, setCompareIds] = useState<string[]>([])
+  const [revisionTarget, setRevisionTarget] = useState<{ setId: string; nonce: number } | null>(null)
   const [appToast, setAppToast] = useState<string | null>(null)
+  const [showTaskEditor, setShowTaskEditor] = useState(false)
 
   const showAppToast = (msg: string) => { setAppToast(msg); setTimeout(() => setAppToast(null), 3000) }
 
@@ -52,7 +51,10 @@ export default function App() {
   useEffect(() => {
     const token = getStoredToken()
     if (!token) { setAuthLoading(false); return }
-    getCurrentUser().then(setCurrentUser).catch(() => clearStoredToken()).finally(() => setAuthLoading(false))
+    getCurrentUser().then((user) => {
+      setCurrentUser(user)
+      if (user.role === 'standard_reviewer') setActiveView('standards')
+    }).catch(() => clearStoredToken()).finally(() => setAuthLoading(false))
   }, [])
 
   useEffect(() => {
@@ -63,23 +65,37 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('emc_last_view', activeView) }, [activeView])
 
-  function handleLogout() { clearStoredToken(); setCurrentUser(null); setResult(null); setBatchResults(null); setCompareIds([]) }
+  function handleLogout() { clearStoredToken(); setCurrentUser(null) }
 
-  const handleUploadResult = useCallback((d: UploadResponse) => { setResult(d); setRefreshKey(k => k + 1) }, [])
-  const handleBatchResult = useCallback((r: BatchFileResult[]) => { setBatchResults(r); setResult(null); setRefreshKey(k => k + 1) }, [])
-  const handleHistorySelect = useCallback((d: UploadResponse) => { setResult(d); setBatchResults(null); setCompareIds([]); setActiveView('upload'); setRefreshKey(k => k + 1) }, [])
-  const handleCompare = useCallback((ids: string[]) => { setCompareIds(ids); setResult(null); setBatchResults(null) }, [])
+  async function handleOpenTask(setId: string, status: string) {
+    try {
+      if (status === 'reviewed') await createDocumentSetRevision(setId)
+      setRevisionTarget({ setId, nonce: Date.now() })
+      setActiveView('workbench')
+      setShowTaskEditor(true)
+      showAppToast(status === 'reviewed' ? '已创建修订草稿' : '已打开任务资料')
+    } catch (error: any) {
+      showAppToast(error?.response?.data?.detail || error.message || '打开任务失败')
+    }
+  }
+
+  function handleReviewComplete() {
+    setRevisionTarget(null)
+    setShowTaskEditor(false)
+    showAppToast('审核完成，已返回任务工作台')
+  }
+
 
   const role = currentUser?.role
-  const roleLabel = role === 'admin' ? '管理员' : role === 'reviewer' ? '审核员' : '查看者'
+  const roleLabel = role === 'admin' ? '管理员' : role === 'reviewer' ? '审核员' : role === 'standard_reviewer' ? '标准审核员' : '查看者'
 
   const all: { key: View; label: string; roles: string[] }[] = [
-    { key: 'upload', label: '上传审核', roles: ['admin', 'reviewer'] },
-    { key: 'my_reports', label: '我的报告', roles: ['admin', 'reviewer', 'viewer'] },
+    { key: 'workbench', label: '审核任务', roles: ['admin', 'reviewer', 'viewer'] },
     { key: 'dashboard', label: '统计仪表盘', roles: ['admin', 'reviewer', 'viewer'] },
-    { key: 'groups', label: '项目组', roles: ['admin', 'reviewer', 'viewer'] },
-    { key: 'config', label: '审核配置', roles: ['admin', 'reviewer'] },
-    { key: 'standards', label: '标准库', roles: ['admin', 'reviewer'] },
+    { key: 'groups', label: '项目组', roles: ['admin', 'reviewer'] },
+    { key: 'standards', label: '标准库', roles: ['admin', 'standard_reviewer'] },
+    { key: 'users', label: '用户权限', roles: ['admin'] },
+    { key: 'operations', label: '系统运维', roles: ['admin'] },
   ]
   const tabs = all.filter(t => role && t.roles.includes(role))
 
@@ -117,19 +133,20 @@ export default function App() {
         <div className="main-topbar"><span className="main-title">{TITLES[activeView]}</span></div>
         <div className="main-content">
           <ErrorBoundary>
-          <div style={{ display: activeView === 'upload' ? undefined : 'none' }}>
-            <ReportUploader onResult={handleUploadResult} onBatchResult={handleBatchResult} />
-            {batchResults && <BatchReviewer results={batchResults} onSelect={handleUploadResult} />}
-            {result && (<>{batchResults && <button className="filter-btn" onClick={() => setResult(null)} style={{marginBottom:8}}>← 返回批量结果</button>}<ReportReviewer data={result} /></>)}
-          </div>
-          <div style={{ display: activeView === 'config' ? undefined : 'none' }}><RulesManager /></div>
-          <div style={{ display: activeView === 'standards' ? undefined : 'none' }}><StandardsBrowser /></div>
-          <div style={{ display: activeView === 'groups' ? undefined : 'none' }}><ProjectGroups /></div>
-          <div style={{ display: activeView === 'dashboard' ? undefined : 'none' }}><StatsDashboard /></div>
-          <div style={{ display: activeView === 'my_reports' ? undefined : 'none' }}>
-            <ReportHistory onSelect={handleHistorySelect} refreshKey={refreshKey} onCompare={handleCompare} scope="mine" currentUserId={currentUser.employee_id} />
-          </div>
-          {compareIds.length === 2 && <ReportComparison idA={compareIds[0]} idB={compareIds[1]} onClose={() => setCompareIds([])} />}
+          {activeView === 'workbench' && (showTaskEditor ? <div>
+            <button className="task-back" onClick={() => setShowTaskEditor(false)}><Icon name="arrow-left" size={16} />返回任务工作台</button>
+            <DocumentSetUploader revisionTarget={revisionTarget} onReviewComplete={handleReviewComplete} />
+          </div> : <ReviewTaskWorkbench
+            onCreateTask={() => { setRevisionTarget(null); setShowTaskEditor(true) }}
+            onEditTask={handleOpenTask}
+          />)}
+          <Suspense fallback={<div className="history-loading">加载中...</div>}>
+            {activeView === 'standards' && <StandardsBrowser />}
+            {activeView === 'groups' && <ProjectGroups />}
+            {activeView === 'dashboard' && <StatsDashboard />}
+            {activeView === 'users' && <UserManagement />}
+            {activeView === 'operations' && <SystemOperations />}
+          </Suspense>
           </ErrorBoundary>
         </div>
       </main>

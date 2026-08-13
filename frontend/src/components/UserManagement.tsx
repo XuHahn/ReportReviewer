@@ -5,6 +5,7 @@ import type { User, UserRole } from '../types'
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: '管理员',
   reviewer: '审核员',
+  standard_reviewer: '标准审核员',
   viewer: '查看者',
 }
 
@@ -72,6 +73,7 @@ export default function UserManagement() {
         <select className="filter-select" value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)}>
           <option value="viewer">查看者</option>
           <option value="reviewer">审核员</option>
+          <option value="standard_reviewer">标准审核员</option>
           <option value="admin">管理员</option>
         </select>
         <button className="filter-btn" type="submit" disabled={adding}>
@@ -111,6 +113,7 @@ export default function UserManagement() {
                   >
                     <option value="viewer">查看者</option>
                     <option value="reviewer">审核员</option>
+                    <option value="standard_reviewer">标准审核员</option>
                     <option value="admin">管理员</option>
                   </select>
                 </td>

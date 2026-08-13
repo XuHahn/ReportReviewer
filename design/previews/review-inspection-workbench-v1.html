@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>核查工作区 · 原文高亮与证据链</title>
+  <style>
+    :root { --ink:#142530; --text:#314957; --muted:#71828a; --canvas:#edf2f3; --panel:#fbfcfc; --line:#d3dfe1; --green:#0b6b59; --green-soft:#e5f3ee; --blue:#2f6384; --blue-soft:#eaf2f7; --amber:#b97910; --amber-soft:#fff4da; --red:#c6453d; --red-soft:#fff0ee; --shadow:0 18px 45px rgba(20,45,54,.11); --body:"Avenir Next","PingFang SC","Microsoft YaHei",system-ui,sans-serif; --display:"Songti SC","STSong",serif; --mono:"DIN Alternate","SFMono-Regular",ui-monospace,monospace; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; background:var(--canvas); color:var(--ink); font-family:var(--body); }
+    button,input,textarea { font:inherit; }
+    button { cursor:pointer; }
+    button:focus-visible,input:focus-visible,textarea:focus-visible { outline:3px solid rgba(47,99,132,.28); outline-offset:2px; }
+    .app { min-height:100vh; display:grid; grid-template-columns:252px minmax(0,1fr); }
+    .rail { position:sticky; top:0; height:100vh; overflow:auto; border-right:1px solid #c8d5d7; background:#f8fbfb; }
+    .brand { height:68px; display:flex; align-items:center; gap:11px; padding:0 17px; border-bottom:1px solid var(--line); }
+    .mark { width:32px; height:32px; display:grid; place-items:center; border:2px solid var(--green); border-radius:50%; color:var(--green); font-size:18px; }
+    .brand b { display:block; font-size:13px; }
+    .brand small { display:block; margin-top:2px; color:var(--muted); font:9px/1 var(--mono); letter-spacing:.1em; }
+    .rail-top { padding:16px 12px 10px; }
+    .rail-top button { width:100%; min-height:38px; border:0; border-radius:7px; background:var(--ink); color:#fff; font-size:11px; font-weight:750; }
+    .rail-top input { width:100%; height:34px; margin-top:9px; padding:0 10px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--text); font-size:10px; }
+    .rail-label { display:flex; justify-content:space-between; padding:8px 17px; color:#839198; font:9px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+    .task { position:relative; width:calc(100% - 18px); margin:4px 9px; padding:12px 10px 11px 14px; border:1px solid transparent; border-radius:7px; background:transparent; color:inherit; text-align:left; }
+    .task::before { content:""; position:absolute; left:5px; top:10px; bottom:10px; width:3px; border-radius:0 3px 3px 0; background:transparent; }
+    .task.active { border-color:#bfd0d3; background:#fff; box-shadow:0 8px 23px rgba(24,49,57,.07); }
+    .task.active::before { background:var(--green); }
+    .task b { display:block; font:750 10px/1.35 var(--mono); }
+    .task span { display:block; margin-top:5px; overflow:hidden; color:var(--muted); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+    .task footer { display:flex; justify-content:space-between; margin-top:8px; color:#839198; font-size:8px; }
+    .pill { display:inline-flex; align-items:center; gap:4px; padding:4px 7px; border-radius:99px; background:var(--green-soft); color:var(--green); font-size:9px; font-weight:750; white-space:nowrap; }
+    .pill.red { background:var(--red-soft); color:var(--red); }
+    .pill.amber { background:var(--amber-soft); color:var(--amber); }
+    .pill.blue { background:var(--blue-soft); color:var(--blue); }
+    .main { min-width:0; }
+    .topbar { position:sticky; top:0; z-index:20; height:68px; display:flex; align-items:center; justify-content:space-between; gap:14px; padding:0 24px; border-bottom:1px solid #c8d5d7; background:rgba(251,252,252,.96); backdrop-filter:blur(12px); }
+    .topbar small { display:block; color:var(--muted); font-size:9px; }
+    .topbar b { display:block; margin-top:3px; font-size:13px; }
+    .top-actions { display:flex; gap:7px; }
+    .ghost,.primary,.icon { min-height:34px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--text); font-size:10px; font-weight:750; }
+    .ghost,.primary { padding:0 11px; }
+    .primary { border-color:var(--green); background:var(--green); color:#fff; }
+    .icon { width:34px; padding:0; font-size:16px; }
+    .journey { display:grid; grid-template-columns:repeat(6,minmax(75px,1fr)); gap:0; padding:18px 30px 16px; border-bottom:1px solid var(--line); background:var(--panel); }
+    .stage { position:relative; text-align:center; }
+    .stage::after { content:""; position:absolute; left:calc(50% + 16px); right:calc(-50% + 16px); top:14px; height:1px; background:#b8c8cc; }
+    .stage:last-child::after { display:none; }
+    .stage i { position:relative; z-index:1; width:28px; height:28px; display:grid; place-items:center; margin:auto; border:1px solid #9fb2b7; border-radius:50%; background:#fff; color:#6c7d84; font:750 9px/1 var(--mono); font-style:normal; }
+    .stage.done i { border-color:var(--green); background:var(--green); color:#fff; }
+    .stage.current i { border-color:var(--red); background:var(--red-soft); color:var(--red); }
+    .stage b,.stage span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .stage b { margin-top:6px; font-size:9px; }
+    .stage span { margin-top:3px; color:var(--muted); font-size:8px; }
+    .page { max-width:1800px; margin:auto; padding:22px 24px 50px; }
+    .page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin-bottom:15px; }
+    .eyebrow { color:var(--green); font:750 9px/1 var(--mono); letter-spacing:.14em; }
+    h1 { margin:7px 0 0; font:700 24px/1.25 var(--display); }
+    .page-head p { max-width:760px; margin:7px 0 0; color:var(--muted); font-size:11px; line-height:1.55; }
+    .result-state { text-align:right; }
+    .result-state strong { display:block; margin-top:7px; font:750 12px/1 var(--mono); }
+    .intake { margin-bottom:15px; padding:15px; border:1px solid #c8d5d7; border-radius:8px; background:var(--panel); box-shadow:0 9px 26px rgba(20,45,54,.06); }
+    .intake-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:11px; }
+    .intake-head h2 { margin:0; font-size:15px; }
+    .intake-head p { margin:5px 0 0; color:var(--muted); font-size:10px; line-height:1.5; }
+    .intake-grid { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(310px,.7fr); gap:10px; }
+    .upload-area { min-height:126px; display:grid; place-items:center; border:1.5px dashed #9bb7b8; border-radius:7px; background:linear-gradient(135deg,#f3faf7,#fbfcfc); text-align:center; }
+    .upload-area .upload-mark { width:30px; height:30px; display:grid; place-items:center; margin:auto; border:1px solid #9bc9bd; border-radius:50%; background:var(--green-soft); color:var(--green); font-size:17px; }
+    .upload-area b { display:block; margin-top:7px; font-size:11px; }
+    .upload-area p { margin:4px 0 9px; color:var(--muted); font-size:9px; }
+    .upload-area button { min-height:29px; padding:0 10px; border:1px solid #b8cdcf; border-radius:5px; background:#fff; color:var(--blue); font-size:9px; font-weight:750; }
+    .doc-slots { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; margin-top:8px; }
+    .doc-slot { position:relative; min-height:88px; padding:10px 9px 9px 12px; border:1px solid #d8e2e4; border-radius:6px; background:#fff; }
+    .doc-slot::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--green); }
+    .doc-slot.warn::before { background:var(--amber); }
+    .doc-slot.fail::before { background:var(--red); }
+    .doc-slot b { display:block; font-size:10px; }
+    .doc-slot small { display:block; margin-top:5px; overflow:hidden; color:var(--muted); font-size:8px; text-overflow:ellipsis; white-space:nowrap; }
+    .doc-slot footer { display:flex; align-items:center; justify-content:space-between; gap:5px; margin-top:8px; }
+    .doc-slot footer span { color:var(--green); font-size:8px; font-weight:750; }
+    .doc-slot.warn footer span { color:var(--amber); }
+    .doc-slot.fail footer span { color:var(--red); }
+    .doc-slot footer button { border:0; background:transparent; color:var(--blue); font-size:8px; font-weight:750; }
+    .prep { padding:12px; border:1px solid #d8e2e4; border-radius:6px; background:#f8faf9; }
+    .prep h3 { margin:0; font-size:11px; }
+    .prep p { margin:5px 0 10px; color:var(--muted); font-size:9px; line-height:1.5; }
+    .prep-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid #e2e9e9; }
+    .prep-row b { display:block; font-size:9px; }
+    .prep-row span { display:block; margin-top:3px; color:var(--muted); font-size:8px; }
+    .prep-row button { min-height:27px; padding:0 8px; border:1px solid #c4d2d5; border-radius:5px; background:#fff; color:var(--blue); font-size:8px; font-weight:750; white-space:nowrap; }
+    .lock { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:9px; padding:9px; border:1px solid #bcd8d0; border-radius:5px; background:var(--green-soft); }
+    .lock b { display:block; font-size:9px; }
+    .lock small { display:block; margin-top:3px; color:#52766e; font-size:8px; }
+    .lock button { min-height:31px; padding:0 9px; border:0; border-radius:5px; background:var(--green); color:#fff; font-size:9px; font-weight:750; white-space:nowrap; }
+    .review-tabs { display:flex; gap:5px; margin-bottom:10px; }
+    .review-tabs button { min-height:32px; padding:0 12px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--muted); font-size:10px; font-weight:750; }
+    .review-tabs button.active { border-color:var(--ink); background:var(--ink); color:#fff; }
+    .workbench { min-height:calc(100vh - 250px); display:grid; grid-template-columns:270px minmax(420px,1.2fr) minmax(330px,.8fr); overflow:hidden; border:1px solid #c8d5d7; border-radius:8px; background:var(--panel); box-shadow:var(--shadow); }
+    .issue-nav { border-right:1px solid var(--line); background:#f8fafa; }
+    .issue-tools { display:flex; gap:5px; padding:11px; border-bottom:1px solid var(--line); }
+    .issue-tools button { flex:1; min-height:29px; border:1px solid transparent; border-radius:5px; background:#e8edef; color:#687981; font-size:9px; font-weight:750; }
+    .issue-tools button.active { background:var(--ink); color:#fff; }
+    .issue-list { padding:10px; }
+    .issue-group { display:flex; justify-content:space-between; margin:11px 4px 6px; color:#829097; font-size:9px; font-weight:750; }
+    .issue { position:relative; width:100%; margin-bottom:6px; padding:11px 9px 10px 13px; border:1px solid #dce5e7; border-radius:6px; background:#fff; color:inherit; text-align:left; }
+    .issue::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--red); }
+    .issue[data-issue="complete"]::before { background:var(--green); }
+    .issue.selected { border-color:#e0aca7; background:var(--red-soft); }
+    .issue span { display:flex; justify-content:space-between; color:#87959b; font-size:8px; }
+    .issue h3 { margin:6px 0 4px; font-size:10px; line-height:1.45; }
+    .issue p { margin:0; overflow:hidden; color:#65777f; font-size:8px; text-overflow:ellipsis; white-space:nowrap; }
+    .source-stage { min-width:0; display:flex; flex-direction:column; border-right:1px solid var(--line); }
+    .source-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-bottom:1px solid var(--line); background:#fff; }
+    .source-toolbar small,.source-toolbar b { display:block; }
+    .source-toolbar small { color:var(--muted); font-size:8px; }
+    .source-toolbar b { margin-top:3px; max-width:360px; overflow:hidden; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+    .source-toolbar a { color:var(--blue); font-size:9px; font-weight:750; text-decoration:none; white-space:nowrap; }
+    .evidence-tabs { display:flex; gap:5px; overflow:auto; padding:8px 10px; border-bottom:1px solid var(--line); background:#f5f8f8; }
+    .evidence-tabs button { min-width:125px; padding:7px 9px; border:1px solid transparent; border-radius:6px; background:transparent; color:#71818a; text-align:left; }
+    .evidence-tabs button.active { border-color:#bdcbd0; background:#fff; color:var(--ink); box-shadow:0 2px 7px rgba(20,45,54,.07); }
+    .evidence-tabs b,.evidence-tabs span { display:block; }
+    .evidence-tabs b { font-size:9px; }
+    .evidence-tabs span { margin-top:3px; font-size:8px; white-space:nowrap; }
+    .visual-controls { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 12px; border-bottom:1px solid var(--line); }
+    .visual-controls label { color:var(--muted); font-size:9px; }
+    .zoom { display:flex; align-items:center; gap:5px; }
+    .zoom button { width:27px; height:27px; border:1px solid #c6d3d6; border-radius:5px; background:#fff; color:var(--text); font-size:15px; }
+    .zoom span { min-width:38px; color:var(--text); font:750 9px/1 var(--mono); text-align:center; }
+    .canvas { flex:1; overflow:auto; padding:18px; background:#dfe8ea; }
+    .page-wrap { position:relative; width:min(100%,700px); min-width:450px; margin:auto; transform-origin:top center; transition:transform .18s ease; }
+    .page-wrap img { display:block; width:100%; height:auto; min-height:540px; background:#fff; box-shadow:0 9px 30px rgba(20,45,54,.18); }
+    .paper-fallback { display:none; min-height:680px; padding:55px 46px; background:#fff; box-shadow:0 9px 30px rgba(20,45,54,.18); font-family:"Times New Roman","Songti SC",serif; }
+    .paper-fallback h2 { margin:0 0 22px; text-align:center; font-size:21px; }
+    .paper-fallback .line { height:10px; margin:12px 0; background:#dce1e2; }
+    .paper-fallback .line.short { width:62%; }
+    .fake-table { width:100%; border-collapse:collapse; margin-top:26px; }
+    .fake-table th,.fake-table td { height:34px; border:1px solid #222; text-align:center; font-size:11px; }
+    .fake-table th { background:#e8e8e8; }
+    .highlight { position:absolute; left:var(--x); top:var(--y); width:var(--w); height:var(--h); border:3px solid var(--tone); background:color-mix(in srgb,var(--tone) 17%,transparent); box-shadow:0 0 0 2px rgba(255,255,255,.88); cursor:pointer; }
+    .highlight::after { content:attr(data-label); position:absolute; left:-3px; top:-24px; padding:4px 6px; border-radius:4px; background:var(--tone); color:#fff; font:750 8px/1 var(--mono); white-space:nowrap; }
+    .highlight.active { border-width:4px; box-shadow:0 0 0 3px #fff,0 0 0 6px var(--tone); z-index:3; }
+    .highlight.green { --tone:var(--green); }
+    .highlight.red { --tone:var(--red); }
+    .highlight.amber { --tone:var(--amber); }
+    .canvas-caption { display:flex; flex-wrap:wrap; gap:12px; padding:10px 2px 0; color:#63747b; font-size:9px; }
+    .canvas-caption i { display:inline-block; width:9px; height:9px; margin-right:4px; border:2px solid currentColor; vertical-align:-1px; }
+    .canvas-caption .ok { color:var(--green); }
+    .canvas-caption .warn { color:var(--amber); }
+    .canvas-caption .bad { color:var(--red); }
+    .detail { min-width:0; overflow:auto; background:#fff; }
+    .detail-head { padding:15px 16px 13px; border-bottom:1px solid var(--line); }
+    .detail-head .state { display:inline-flex; padding:4px 7px; border-radius:99px; background:var(--red-soft); color:var(--red); font-size:9px; font-weight:750; }
+    .detail-head .state.missing { background:var(--amber-soft); color:var(--amber); }
+    .detail-head .state.confirm { background:var(--blue-soft); color:var(--blue); }
+    .detail-head .state.complete { background:var(--green-soft); color:var(--green); }
+    .detail-head h2 { margin:8px 0 0; font-size:17px; line-height:1.4; }
+    .detail-head p { margin:6px 0 0; color:var(--muted); font-size:10px; line-height:1.6; }
+    .detail-body { padding:14px 16px 20px; }
+    .section-label { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 8px; }
+    .section-label b { font-size:10px; }
+    .section-label span { color:var(--muted); font-size:8px; }
+    .field-table { overflow:hidden; border:1px solid var(--line); border-radius:6px; }
+    .field-row { display:grid; grid-template-columns:88px minmax(0,1fr); border-bottom:1px solid #e7edef; }
+    .field-row:last-child { border-bottom:0; }
+    .field-row dt,.field-row dd { margin:0; padding:9px 10px; font-size:9px; }
+    .field-row dt { background:#f5f8f8; color:var(--muted); }
+    .field-row dd { color:var(--text); font-weight:650; }
+    .field-row dd.bad { color:var(--red); }
+    .compare-box { margin-top:13px; padding:12px; border:1px solid #d7e1e3; border-radius:6px; background:#f7faf9; }
+    .compare-box h3 { margin:0; font-size:10px; }
+    .compare-line { display:grid; grid-template-columns:75px minmax(0,1fr) 20px minmax(0,1fr); gap:7px; align-items:center; margin-top:9px; color:var(--text); font-size:9px; }
+    .compare-line span:first-child { color:var(--muted); }
+    .compare-line b { padding:6px 7px; border-radius:4px; background:#fff; font-size:9px; }
+    .compare-line b.bad { border:1px solid #e5bcb7; background:var(--red-soft); color:var(--red); }
+    .compare-line i { color:var(--red); font:750 14px/1 var(--mono); font-style:normal; text-align:center; }
+    .type-panel { margin-top:13px; padding:12px; border:1px solid #d7e1e3; border-radius:6px; background:#f7faf9; }
+    .type-panel h3 { margin:0; font-size:10px; }
+    .type-panel p { margin:5px 0 0; color:var(--muted); font-size:9px; line-height:1.55; }
+    .type-panel.conflict { border-color:#e4c1bd; background:var(--red-soft); }
+    .type-panel.missing { border-color:#ead6af; background:var(--amber-soft); }
+    .type-panel.confirm { border-color:#b8d1e0; background:var(--blue-soft); }
+    .type-panel.complete { border-color:#b8d8ce; background:var(--green-soft); }
+    .type-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:10px; }
+    .type-grid article { padding:8px; border:1px solid rgba(47,75,82,.15); border-radius:5px; background:#fff; }
+    .type-grid small,.type-grid b { display:block; }
+    .type-grid small { color:var(--muted); font-size:8px; }
+    .type-grid b { margin-top:5px; color:var(--text); font-size:9px; line-height:1.35; }
+    .type-grid b.bad { color:var(--red); }
+    .parameter-sides { display:grid; grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr); gap:7px; align-items:center; margin-top:10px; }
+    .parameter-side { padding:9px; border:1px solid #e4c1bd; border-radius:5px; background:#fff; }
+    .parameter-side small { display:block; color:var(--muted); font-size:8px; }
+    .parameter-side strong { display:block; margin-top:6px; color:var(--red); font:750 15px/1 var(--mono); }
+    .parameter-sides > b { color:var(--red); font:750 17px/1 var(--mono); text-align:center; }
+    .confirm-list { display:grid; gap:5px; margin-top:9px; }
+    .confirm-list span { display:flex; align-items:center; gap:7px; color:var(--text); font-size:9px; }
+    .confirm-list i { width:15px; height:15px; display:grid; place-items:center; border:1px solid #a8bec8; border-radius:3px; background:#fff; color:var(--blue); font-style:normal; }
+    .meaning { display:grid; gap:8px; margin-top:13px; }
+    .meaning article { padding:11px 12px; border-radius:6px; background:#f4f7f8; }
+    .meaning article:last-child { border:1px solid #ead6af; background:var(--amber-soft); }
+    .meaning b { font-size:10px; }
+    .meaning p { margin:6px 0 0; color:#5f7078; font-size:9px; line-height:1.6; }
+    .provenance { margin-top:13px; padding-top:13px; border-top:1px solid var(--line); }
+    .provenance p { margin:7px 0 0; color:var(--muted); font-size:9px; line-height:1.65; }
+    .provenance code { color:var(--text); font:9px/1.5 var(--mono); }
+    .reason { margin-top:13px; }
+    .reason label { display:flex; justify-content:space-between; gap:10px; color:var(--text); font-size:9px; font-weight:750; }
+    .reason label span { color:var(--muted); font-weight:400; }
+    .reason textarea { width:100%; min-height:68px; margin-top:7px; resize:vertical; border:1px solid #cdd9dc; border-radius:5px; padding:8px; color:var(--text); font-size:9px; line-height:1.55; }
+    .decision { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:10px; }
+    .decision button { min-height:34px; border:1px solid #c6d2d5; border-radius:5px; background:#fff; color:var(--text); font-size:9px; font-weight:750; }
+    .decision button:first-child { border-color:var(--green); background:var(--green); color:#fff; }
+    .next-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+    .next-row span { color:var(--muted); font-size:9px; }
+    .next-row button { min-height:32px; padding:0 10px; border:1px solid #c6d2d5; border-radius:5px; background:#fff; color:var(--text); font-size:9px; font-weight:750; }
+    .raw-view { display:none; padding:18px; background:#f7f9f9; }
+    .raw-view.show { display:block; }
+    .raw-view pre { margin:0; white-space:pre-wrap; color:var(--text); font:11px/1.75 var(--mono); }
+    .activity { display:none; padding:18px; background:#f7f9f9; }
+    .activity.show { display:block; }
+    .activity li { margin:0 0 12px; color:var(--text); font-size:10px; line-height:1.5; }
+    .activity li::marker { color:var(--green); }
+    .toast { position:fixed; left:50%; bottom:24px; z-index:50; display:none; transform:translateX(-50%); padding:10px 14px; border-radius:7px; background:var(--ink); color:#fff; box-shadow:var(--shadow); font-size:10px; }
+    .toast.show { display:block; }
+    @media (max-width:1200px) { .app { grid-template-columns:218px minmax(0,1fr); } .intake-grid { grid-template-columns:1fr; } .doc-slots { grid-template-columns:repeat(2,minmax(0,1fr)); } .workbench { grid-template-columns:240px minmax(360px,1fr); } .detail { grid-column:1 / -1; border-top:1px solid var(--line); } .source-stage { border-right:0; } }
+    @media (max-width:760px) { .app { display:block; } .rail { position:static; height:auto; border-right:0; border-bottom:1px solid var(--line); } .brand { height:58px; } .rail-top { display:none; } .task-list { display:flex; overflow:auto; padding:8px; } .task { min-width:220px; } .topbar { height:auto; min-height:58px; padding:9px 12px; } .top-actions .ghost { display:none; } .journey { grid-template-columns:repeat(6,88px); overflow:auto; padding:14px 12px; } .page { padding:16px 10px 36px; } .page-head { align-items:flex-start; flex-direction:column; } .result-state { text-align:left; } .intake-head { align-items:flex-start; flex-direction:column; } .doc-slots { grid-template-columns:1fr; } .workbench { display:block; min-height:0; } .issue-nav { border-right:0; border-bottom:1px solid var(--line); } .issue-list { display:flex; gap:6px; overflow:auto; } .issue-group { display:none; } .issue { min-width:250px; } .source-stage { border-right:0; border-bottom:1px solid var(--line); } .page-wrap { min-width:500px; } .detail { max-height:none; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none !important; scroll-behavior:auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="brand"><span class="mark">↗</span><div><b>EMC 审核台</b><small>EVIDENCE WORKBENCH</small></div></div>
+      <div class="rail-top"><button type="button">+ 新建审核任务</button><input aria-label="搜索任务" placeholder="搜索编号、产品或项目组" /></div>
+      <div class="rail-label"><span>当前任务</span><span>25 待处理</span></div>
+      <div class="task-list">
+        <button class="task active"><b>EMC-20260729-or78tf</b><span>RD20 电机 · E202508277046</span><footer><span>已锁定 v3</span><span class="pill red">25</span></footer></button>
+        <button class="task"><b>EMC-20260803-5qs8nt</b><span>前车标灯 · P59A / P57A2</span><footer><span>8 月 3 日</span><span class="pill">完成</span></footer></button>
+        <button class="task"><b>EMC-20260728-prr2fg</b><span>控制器 · 电气负荷试验</span><footer><span>7 月 28 日</span><span class="pill amber">需确认 4</span></footer></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar"><div><small>审核任务 / EMC-20260729-or78tf / 第 17 条问题</small><b>RD20 电机电磁兼容检测 · 原文证据核查</b></div><div class="top-actions"><button class="ghost" type="button" id="start-upload">从上传开始</button><button class="ghost" type="button" data-toast="已打开版本记录">版本记录</button><button class="ghost" type="button" data-toast="审核报告导出准备中">导出</button><button class="primary" type="button" id="next-top">下一条问题</button></div></header>
+      <nav class="journey" aria-label="审核链路"><div class="stage done"><i>1</i><b>上传资料</b><span>4 / 4</span></div><div class="stage done"><i>2</i><b>提取核查</b><span>已完成</span></div><div class="stage done"><i>3</i><b>锁定版本</b><span>v3</span></div><div class="stage done"><i>4</i><b>规则审核</b><span>31 项</span></div><div class="stage current"><i>5</i><b>问题核查</b><span>17 / 25</span></div><div class="stage"><i>6</i><b>结论归档</b><span>待完成</span></div></nav>
+
+      <div class="page">
+        <div class="page-head"><div><span class="eyebrow">FULL-PAGE INSPECTION</span><h1>逐条核查：先看原图，再确认系统比较了什么</h1><p>文件名、成员文件、页码、角标页码、原文截图和结构化字段全部同屏展示。高亮框跟随证据坐标，不依赖固定像素。</p></div><div class="result-state"><span class="pill red">需要处理</span><strong id="counter">17 / 25</strong></div></div>
+        <section class="intake" id="intake" aria-label="上传与审核准备">
+          <div class="intake-head"><div><h2>1 · 上传与准备</h2><p>四份必传资料、提取核查、标准选择和锁定版本都在当前任务内完成。</p></div><span class="pill blue">当前任务 v3 · 已锁定</span></div>
+          <div class="intake-grid">
+            <div><div class="upload-area" id="upload-area"><div><div class="upload-mark">↑</div><b>拖入文件，或按资料类型添加</b><p>支持 PDF / DOCX / XLS / XLSX / ZIP · 文件替换会生成新版本</p><button type="button" id="choose-file">选择文件</button></div></div>
+              <div class="doc-slots">
+                <article class="doc-slot"><b>委托单 · 必传</b><small>EMC测试申请表E202508277046（委托单）.xls</small><footer><span>✓ 已提取 / 已核查</span><button type="button" data-toast="打开委托单核查">核查</button></footer></article>
+                <article class="doc-slot"><b>试验计划 · 必传</b><small>ITW-平台执行器用280电机试验大纲251014Rev1.xlsx</small><footer><span>✓ 已提取 / 已核查</span><button type="button" data-toast="打开试验计划核查">核查</button></footer></article>
+                <article class="doc-slot"><b>原始记录 · 必传</b><small>test_set_04-rd20-original-records.zip · 54 个成员文件</small><footer><span>✓ 54 / 54 已转录</span><button type="button" data-toast="打开原始记录清单">清单</button></footer></article>
+                <article class="doc-slot warn"><b>检测报告 · 必传</b><small>报告书_E202508277046-1EN(RD20).docx</small><footer><span>! 待确认 1 项</span><button type="button" data-toast="打开检测报告核查">核查</button></footer></article>
+              </div>
+            </div>
+            <div class="prep"><h3>提交审核前检查</h3><p>失败、卡住和未核查状态都必须显式处理，不能以“通过”代替。</p><div class="prep-row"><div><b>四份必传资料</b><span>4 / 4 已上传并提取</span></div><span class="pill">完成</span></div><div class="prep-row"><div><b>测试标准（可选）</b><span>ISO 16750-2:2012 · 已发布版本</span></div><button type="button" data-toast="打开标准选择">管理标准</button></div><div class="prep-row"><div><b>项目组 / 归属</b><span>电机 · RD20 · EMC 2026</span></div><button type="button" data-toast="打开项目组选择">更换</button></div><div class="lock"><div><b>当前版本已锁定</b><small>替换文件会进入修订流程并要求重新核查。</small></div><button type="button" data-toast="已进入修订上传流程">创建修订</button></div></div>
+          </div>
+        </section>
+        <div class="review-tabs" role="tablist"><button class="active" data-view="structured">结构化对比</button><button data-view="raw">完整原文</button><button data-view="activity">处理记录</button></div>
+
+        <section class="workbench">
+          <aside class="issue-nav">
+            <div class="issue-tools"><button class="active">待处理 25</button><button>全部 34</button><button>已闭合 9</button></div>
+            <div class="issue-list">
+              <div class="issue-group"><span>资料缺失</span><span>16</span></div>
+              <button class="issue" data-issue="coverage"><span><i>高温存储</i><i>待处理</i></span><h3>计划要求做，但没有找到完整测试结果</h3><p>计划有要求，记录与报告未闭合</p></button>
+              <div class="issue-group"><span>内容不一致</span><span>6</span></div>
+              <button class="issue selected" data-issue="conflict"><span><i>反向电压</i><i>待处理</i></span><h3>同一样品和模式出现两种结果</h3><p>0016 · Mode 2 · 报告第 57 页</p></button>
+              <button class="issue" data-issue="parameter"><span><i>接地 / 供电偏移</i><i>待处理</i></span><h3>要求 ±1.5V，结果记录采用 ±1V</h3><p>报告第 60 页与第 62 页</p></button>
+              <div class="issue-group"><span>需要人工确认</span><span>3</span></div>
+              <button class="issue" data-issue="identity"><span><i>委托单位</i><i>待确认</i></span><h3>中英文名称是否指向同一主体？</h3><p>缺少共同企业标识</p></button>
+              <div class="issue-group"><span>证据链完整</span><span>9</span></div>
+              <button class="issue" data-issue="complete"><span><i>反向电压 · Mode 1</i><i>已闭合</i></span><h3>原始记录与报告结果一致</h3><p>无需处理，可继续查看证据</p></button>
+            </div>
+          </aside>
+
+          <section class="source-stage" aria-label="原文证据">
+            <header class="source-toolbar"><div><small id="source-role">原始记录 · ZIP 第 20 份 / 文件第 1 页</small><b id="source-file">E202508277046_反向电压_0016_Mode 2_原始记录.pdf</b></div><a href="#" id="open-file">打开原文件</a></header>
+            <div class="evidence-tabs" id="evidence-tabs" role="tablist"></div>
+            <div class="visual-controls"><label>视觉原文 · 框线来自本条证据的页面坐标</label><div class="zoom"><button id="zoom-out" aria-label="缩小">−</button><span id="zoom-value">100%</span><button id="zoom-in" aria-label="放大">+</button></div></div>
+            <div class="canvas" id="canvas"><div class="page-wrap" id="page-wrap"><img id="source-image" src="../../tmp/docx-report-actual-render/page-7.png" alt="原文页面" /><div class="paper-fallback" id="fallback"><h2>原始记录</h2><div class="line short"></div><div class="line"></div><table class="fake-table"><tr><th>测试项目</th><th>条件</th><th>判据</th><th>结果</th></tr><tr><td>反向电压</td><td>14V / 60s</td><td>C</td><td>符合</td></tr><tr><td>Reversed voltage</td><td>14V / 60s</td><td>A / C</td><td>Pass / 不 Pass</td></tr></table><div class="line"></div><div class="line short"></div></div></div><div class="canvas-caption"><span class="ok"><i></i>一致证据</span><span class="warn"><i></i>字段来源</span><span class="bad"><i></i>矛盾或缺失</span><span>点击框线可定位右侧字段</span></div></div>
+            <div class="raw-view" id="raw-view"><pre id="raw-text"></pre></div>
+            <div class="activity" id="activity-view"><ol><li>11:26 · 系统创建审核快照 v3，冻结 4 份资料当前版本。</li><li>11:29 · 规则 REPORT-RESULT-CONFLICT-001 生成问题。</li><li>11:29 · 已定位原始记录 ZIP 第 20 份第 1 页、报告文件第 57 页。</li><li>待处理 · 审核员尚未提交人工理由。</li></ol></div>
+          </section>
+
+          <aside class="detail" aria-live="polite">
+            <header class="detail-head"><span class="state" id="detail-state">结果互相矛盾</span><h2 id="detail-title">反向电压：同一样品和模式同时出现“通过”与“不通过”</h2><p id="detail-copy">样品 E202508277046-0016、Mode 2、14V / 60s 的报告页出现两条互相冲突的结果。</p></header>
+            <div class="detail-body" id="structured-view">
+              <div class="section-label"><b>系统实际比较了什么</b><span id="evidence-count">2 份资料 · 3 处证据</span></div>
+              <dl class="field-table" id="field-table"></dl>
+              <div id="type-specific"></div>
+              <div class="meaning"><article><b>这意味着什么</b><p id="meaning">报告内部两条结果不能同时成立，而且其中一条与原始记录不一致。</p></article><article><b>建议怎么处理</b><p id="suggestion">先核对报告第 57 页第二条记录，再按原始记录修正结果表和汇总结论。</p></article></div>
+              <div class="provenance"><div class="section-label"><b>证据溯源</b><span>快照版本 v3</span></div><p id="provenance">文件：<code>test_set_04-rd20-original-records.zip</code><br />成员：<code>第 20 份 · E202508277046-0016_Mode2.pdf</code><br />页面：<code>文件第 1 页</code> · 报告角标：<code>Page 57 of 84</code></p></div>
+              <div class="reason"><label for="reason">处理理由 <span>必填 · 写入审计记录</span></label><textarea id="reason" placeholder="说明你选择该处理方式的依据，例如：报告第 57 页第二条记录与原始记录第 1 页不一致……"></textarea></div>
+              <div class="decision"><button data-decision="report_revision">要求修改报告</button><button data-decision="raw_error">原始记录有误</button><button data-decision="confirmed">确认不是问题</button><button data-decision="hold">暂时搁置</button></div>
+              <div class="next-row"><span>保存后自动进入下一条</span><button id="save-next">保存并下一条 →</button></div>
+            </div>
+          </aside>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const data = {
+      conflict: { state:'结果互相矛盾', title:'反向电压：同一样品和模式同时出现“通过”与“不通过”', copy:'样品 E202508277046-0016、Mode 2、14V / 60s 的报告页出现两条互相冲突的结果。', role:'原始记录 · ZIP 第 20 份 / 文件第 1 页', file:'E202508277046_反向电压_0016_Mode 2_原始记录.pdf', image:'../../tmp/docx-report-actual-render/page-7.png', count:'2 份资料 · 3 处证据', left:'符合 · 要求 C', right:'Pass / 不 Pass', meaning:'报告内部两条结果不能同时成立，而且其中一条与原始记录不一致。', suggestion:'先核对报告第 57 页第二条记录，再按原始记录修正结果表和汇总结论。', raw:'原始记录：反向电压 / 14V / 60s / C / C¹⁾ / 符合\n检测报告 1：Reversed voltage / 14V / 60s / C / C¹⁾ / Pass\n检测报告 2：Reversed voltage / 14V / 60s / A / C¹⁾ / 不 Pass', fields:[['测试身份','E202508277046-0016 · Mode 2','ok'],['测试条件','14V / 60s','ok'],['要求等级','C（原始记录） vs A（报告第 2 条）','bad'],['实际等级','C¹⁾','ok'],['原文结果','符合 / Pass / 不 Pass','bad']], tabs:[{name:'原始记录',meta:'文件第 1 页',tone:'green',marks:[['green','样品编号','17%','29%','32%','5%'],['green','结果：符合','70%','53%','16%','5%']]},{name:'检测报告',meta:'Page 57 of 84',tone:'red',image:'../../tmp/docx-report-actual-render/page-8.png',marks:[['amber','样品编号','17%','29%','32%','5%'],['green','Pass','71%','52%','13%','5%'],['red','不 Pass','71%','68%','15%','6%']]}] },
+      parameter: { state:'参数前后不一致', title:'接地 / 供电偏移：要求 ±1.5V，结果记录采用 ±1V', copy:'规范要求页写的是 ±1.5V，结果页执行记录写的是 ±1V；两页都保留在核查视野内。', role:'检测报告 · 文件第 60 页', file:'报告书_E202508277046-1EN(RD20).docx', image:'../../tmp/docx-report-actual-render/page-10.png', count:'1 份资料 · 2 处证据', left:'要求 ±1.5V', right:'实际 ±1V', meaning:'报告声明的试验要求与实际记录参数不一致，无法证明试验按声明条件完成。', suggestion:'返回原始记录确认实际设置值；报告录入错误就修正，实际条件不符则补测。', raw:'规范要求页：Offset voltage ±1.5V\n结果记录页：Offset voltage ±1V', fields:[['测试项目','接地 / 供电偏移','ok'],['规范要求','Offset voltage ±1.5V','bad'],['实际参数','Offset voltage ±1V','bad'],['报告结果','Pass','ok']], tabs:[{name:'规范要求页',meta:'Page 60 of 84',tone:'red',marks:[['red','要求 ±1.5V','38%','46%','25%','6%']]},{name:'结果记录页',meta:'Page 62 of 84',tone:'red',image:'../../tmp/docx-report-actual-render/page-11.png',marks:[['red','实际 ±1V','38%','46%','21%','6%']]}] },
+      coverage: { state:'资料未闭合', title:'高温存储：计划要求执行，但没有找到完整结果', copy:'试验计划列出高温存储要求；原始记录和检测报告中没有形成可确认的完整结果。', role:'试验计划 · 文件第 3 页', file:'ITW-平台执行器用280电机试验大纲251014Rev1.xlsx', image:'../../tmp/docx-report-actual-render/page-3.png', count:'3 份资料 · 1 处计划证据', left:'计划要求 85℃ / 48h', right:'记录 / 报告未找到', meaning:'计划项目没有闭环到执行证据和报告结论，不能确认该测试已经完成。', suggestion:'确认是否漏传原始记录或报告章节；确实未执行时需要补测并更新报告。', raw:'试验计划：高温存储 / 85℃ / 48h / 实验后满足性能要求\n原始记录：未找到可确认匹配\n检测报告：未找到可确认结论', fields:[['计划项目','高温存储','ok'],['计划条件','85℃ / 48h','ok'],['原始记录','未找到','bad'],['检测报告','未找到','bad']], tabs:[{name:'试验计划',meta:'文件第 3 页',tone:'amber',marks:[['amber','高温存储','19%','43%','26%','6%']]},{name:'检索结果',meta:'0 条可确认匹配',tone:'red',image:'../../tmp/docx-report-actual-render/page-4.png',marks:[['red','缺少执行证据','24%','46%','38%','6%']]}] },
+      identity: { state:'需要人工确认', title:'委托单位的中英文名称是否指向同一主体？', copy:'委托单使用中文企业名称，报告使用英文名称；缺少共同标识时，系统不直接判错。', role:'委托单 · 文件第 1 页', file:'EMC测试申请表E202508277046（委托单）.xls', image:'../../tmp/docx-report-actual-render/page-1.png', count:'2 份资料 · 2 处名称证据', left:'中文企业名称', right:'Kindly Industrial Co., Ltd', meaning:'不同语言名称可能属于同一主体，也可能不是。没有共同标识时，需要审核员确认。', suggestion:'核对地址、统一社会信用代码或委托范围，确认后把判断依据写入处理记录。', raw:'委托单：中文企业名称 / 未找到统一标识\n检测报告：Kindly Industrial Co., Ltd / 未找到统一标识', fields:[['委托单位','中文企业名称 vs Kindly Industrial Co., Ltd','bad'],['地址 / 统一标识','未找到共同值','bad'],['系统结论','需要人工确认','ok']], tabs:[{name:'委托单',meta:'文件第 1 页',tone:'amber',marks:[['amber','中文名称','20%','26%','35%','6%'],['red','无共同标识','59%','26%','23%','6%']]},{name:'检测报告',meta:'Page 7 of 84',tone:'amber',image:'../../tmp/docx-report-actual-render/page-8.png',marks:[['amber','英文名称','20%','26%','39%','6%'],['red','无共同标识','59%','26%','23%','6%']]}] },
+      complete: { state:'证据链完整', title:'反向电压 Mode 1：原始记录与报告结果一致', copy:'同一测试项目、样品和模式在原始记录与报告中均能回溯，结果均为通过；这条记录无需处理。', role:'原始记录 · ZIP 第 19 份 / 文件第 1 页', file:'E202508277046_反向电压_0017_Mode 1_原始记录.pdf', image:'../../tmp/docx-report-actual-render/page-6.png', count:'2 份资料 · 2 处一致证据', left:'符合 · C¹⁾', right:'Pass', meaning:'证据链已经闭合，计划要求、原始记录和报告结果能够相互对应。', suggestion:'无需修改，可继续查看其他待处理问题。', raw:'原始记录：反向电压 / Mode 1 / 14V / 60s / C / 符合\n检测报告：Reversed voltage / Mode 1 / 14V / 60s / C / Pass', fields:[['测试身份','E202508277046-0017 · Mode 1','ok'],['测试条件','14V / 60s','ok'],['要求等级','C','ok'],['实际等级','C¹⁾','ok'],['原文结果','符合 / Pass','ok']], tabs:[{name:'原始记录',meta:'文件第 1 页',tone:'green',marks:[['green','结果：符合','70%','53%','16%','5%']]},{name:'检测报告',meta:'Page 56 of 84',tone:'green',image:'../../tmp/docx-report-actual-render/page-6.png',marks:[['green','Result: Pass','71%','52%','14%','5%']]}] }
+    };
+    const issueOrder=['coverage','conflict','parameter','identity','complete']; let active='conflict'; let tab='structured'; let zoom=1; let currentTab=0; let selectedMark='';
+    const $=s=>document.querySelector(s); const $$=s=>[...document.querySelectorAll(s)];
+    function toast(message){ const node=$('#toast'); node.textContent=message; node.classList.add('show'); window.clearTimeout(toast.timer); toast.timer=window.setTimeout(()=>node.classList.remove('show'),2200); }
+    function render(key){ active=key; const item=data[key]; currentTab=0; selectedMark=''; const stateNode=$('#detail-state'); stateNode.textContent=item.state; stateNode.className=`state ${key==='complete'?'complete':key==='identity'?'confirm':key==='coverage'?'missing':'conflict'}`; $('#detail-title').textContent=item.title; $('#detail-copy').textContent=item.copy; $('#source-role').textContent=item.role; $('#source-file').textContent=item.file; $('#evidence-count').textContent=item.count; $('#meaning').textContent=item.meaning; $('#suggestion').textContent=item.suggestion; $('#raw-text').textContent=item.raw; $('#provenance').innerHTML=`文件：<code>${item.file}</code><br />页面：<code>${item.tabs[0].meta}</code> · 坐标：<code>归一化页面坐标 [0, 0, 1, 1]</code>`; $('#counter').textContent=`${issueOrder.indexOf(key)+1} / ${issueOrder.length}`; $$('.issue').forEach(b=>b.classList.toggle('selected',b.dataset.issue===key)); $('.reason').style.display=key==='complete'?'none':'block'; $('.decision').style.display=key==='complete'?'none':'grid'; $('.next-row span').textContent=key==='complete'?'无需处理，可继续查看下一条':'保存后自动进入下一条'; renderTabs(); renderFields(item.fields); renderTypeSpecific(key,item); renderPage(); }
+    function renderTabs(){ const item=data[active]; $('#evidence-tabs').innerHTML=item.tabs.map((tabItem,i)=>`<button class="${i===currentTab?'active':''}" data-tab="${i}" role="tab"><b>${tabItem.name}</b><span>${tabItem.meta}</span></button>`).join(''); $$('#evidence-tabs button').forEach(b=>b.addEventListener('click',()=>{currentTab=Number(b.dataset.tab); selectedMark=''; renderTabs(); renderPage();})); }
+    function renderFields(fields){ $('#field-table').innerHTML=fields.map(row=>`<div class="field-row"><dt>${row[0]}</dt><dd class="${row[2]==='bad'?'bad':''}">${row[1]}</dd></div>`).join(''); }
+    function renderTypeSpecific(key,item){
+      const target=$('#type-specific');
+      if(key==='conflict') target.innerHTML=`<section class="type-panel conflict"><h3>报告内部结果冲突</h3><p>先比较同一报告内的多条记录，再与原始记录核对；“Pass”和“不 Pass”不能合并成一个结论。</p><div class="type-grid"><article><small>原始记录 · C</small><b>符合</b></article><article><small>报告记录 1 · C</small><b>Pass</b></article><article><small>报告记录 2 · A</small><b class="bad">不 Pass</b></article></div></section>`;
+      else if(key==='coverage') target.innerHTML=`<section class="type-panel missing"><h3>资料未闭合</h3><p>这不是“报告写错”，而是计划要求没有连接到执行证据和报告结论。</p><div class="type-grid"><article><small>试验计划</small><b>已找到：85℃ / 48h</b></article><article><small>原始记录</small><b class="bad">未找到可确认记录</b></article><article><small>检测报告</small><b class="bad">未找到对应结论</b></article></div></section>`;
+      else if(key==='parameter') target.innerHTML=`<section class="type-panel conflict"><h3>规范要求与实际参数不一致</h3><p>左侧是“应当怎么做”，右侧是“结果记录写了什么”，系统不替审核员决定哪一侧正确。</p><div class="parameter-sides"><article class="parameter-side"><small>规范要求</small><strong>±1.5V</strong></article><b>≠</b><article class="parameter-side"><small>实际记录</small><strong>±1V</strong></article></div></section>`;
+      else if(key==='complete') target.innerHTML=`<section class="type-panel complete"><h3>证据链已闭合</h3><p>这类记录不显示“错误处理”按钮，保留原文溯源供复核即可。</p><div class="type-grid"><article><small>原始记录</small><b>符合 · C¹⁾</b></article><article><small>检测报告</small><b>Pass</b></article><article><small>处理状态</small><b>无需处理</b></article></div></section>`;
+      else target.innerHTML=`<section class="type-panel confirm"><h3>需要人工确认</h3><p>名称写法不同不等于主体不同；缺少共同标识时只提醒人工核对。</p><div class="confirm-list"><span><i>□</i>地址是否一致</span><span><i>□</i>统一社会信用代码是否一致</span><span><i>□</i>委托范围和联系人是否能相互佐证</span></div></section>`;
+    }
+    function renderPage(){ const item=data[active], source=item.tabs[currentTab]; const img=$('#source-image'); img.src=source.image||item.image; img.style.display='block'; $('#fallback').style.display='none'; img.onerror=()=>{img.style.display='none';$('#fallback').style.display='block';}; $('#page-wrap').style.transform=`scale(${zoom})`; $('#zoom-value').textContent=`${Math.round(zoom*100)}%`; $$('#page-wrap .highlight').forEach(n=>n.remove()); source.marks.forEach((m,i)=>{ const node=document.createElement('span'); node.className=`highlight ${m[0]} ${selectedMark===String(i)?'active':''}`; node.dataset.label=m[1]; node.dataset.mark=String(i); node.style.setProperty('--x',m[2]); node.style.setProperty('--y',m[3]); node.style.setProperty('--w',m[4]); node.style.setProperty('--h',m[5]); node.title='点击查看右侧字段'; node.addEventListener('click',()=>{selectedMark=String(i); renderPage(); toast(`已定位：${m[1]}`);}); $('#page-wrap').appendChild(node); }); }
+    function setView(mode){ tab=mode; $$('.review-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===mode)); $('#structured-view').style.display=mode==='structured'?'block':'none'; $('#raw-view').classList.toggle('show',mode==='raw'); $('#activity-view').classList.toggle('show',mode==='activity'); }
+    $$('.issue').forEach(b=>b.addEventListener('click',()=>render(b.dataset.issue))); $$('.review-tabs button').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.view))); $('#zoom-in').addEventListener('click',()=>{zoom=Math.min(1.6,zoom+.1);renderPage();}); $('#zoom-out').addEventListener('click',()=>{zoom=Math.max(.7,zoom-.1);renderPage();}); $('#start-upload').addEventListener('click',()=>document.getElementById('intake').scrollIntoView({behavior:'smooth',block:'start'})); $('#open-file').addEventListener('click',e=>{e.preventDefault();toast('原文件入口已保留：实际接入时打开本次快照文件并定位页码');}); $('#choose-file').addEventListener('click',()=>toast('选择文件后会按资料类型进入对应卡片')); $('#upload-area').addEventListener('click',e=>{if(e.target.id!=='choose-file') toast('支持拖放上传；文件会进入提取状态并可重试');}); $$('[data-decision]').forEach(b=>b.addEventListener('click',()=>{ if(!$('#reason').value.trim()){ toast('请先填写处理理由'); $('#reason').focus(); return; } toast(`已选择：${b.textContent}，待保存`); })); $('#save-next').addEventListener('click',()=>{const wasComplete=active==='complete'; if(!wasComplete&&!$('#reason').value.trim()){toast('请先填写处理理由');$('#reason').focus();return;} const i=(issueOrder.indexOf(active)+1)%issueOrder.length; render(issueOrder[i]); toast(wasComplete?'已进入下一条问题':'已保存处理理由，进入下一条问题');}); $('#next-top').addEventListener('click',()=>$('#save-next').click()); $$('[data-toast]').forEach(b=>b.addEventListener('click',()=>toast(b.dataset.toast))); window.addEventListener('resize',()=>renderPage()); render('conflict');
+  </script>
+</body>
+</html>

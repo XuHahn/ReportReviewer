@@ -1,22 +1,26 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-cd "$(dirname "$0")"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONDA_ENV_NAME="${REPORT_REVIEWER_CONDA_ENV:-report-reviewer}"
+cd "$PROJECT_DIR"
 echo "============================================"
 echo " EMC报告审核系统 — 一键环境安装"
 echo "============================================"
 
 echo ""
-echo "[1/3] 安装 Python 后端依赖..."
-cd backend && pip install -r requirements.txt && cd ..
+echo "[1/2] 创建 Conda 后端环境并安装依赖..."
+command -v conda >/dev/null || { echo "缺少 Conda，请先安装 Miniconda" >&2; exit 1; }
+if ! conda run -n "$CONDA_ENV_NAME" python -c "import sys" >/dev/null 2>&1; then
+  conda create -y -n "$CONDA_ENV_NAME" -c conda-forge --override-channels python=3.13 pip
+fi
+conda run -n "$CONDA_ENV_NAME" python -m pip install \
+  -r "$PROJECT_DIR/backend/requirements.txt" \
+  -r "$PROJECT_DIR/backend/tests/requirements-test.txt"
 
 echo ""
-echo "[2/3] 安装前端依赖..."
-cd frontend && npm install && cd ..
-
-echo ""
-echo "[3/3] 安装后台管理依赖..."
-cd admin && npm install && cd ..
+echo "[2/2] 安装统一前端依赖..."
+(cd "$PROJECT_DIR/frontend" && npm install)
 
 echo ""
 echo "============================================"
@@ -34,7 +38,6 @@ fi
 
 echo ""
 echo "启动命令："
-echo "  后端:  cd backend && uvicorn main:app --port 8000"
+echo "  后端:  cd backend && conda run -n $CONDA_ENV_NAME python -m uvicorn main:app --port 8000"
 echo "  前端:  cd frontend && npm run dev"
-echo "  后台:  cd admin && npm run dev"
 echo "  一键:  bash start.sh"

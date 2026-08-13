@@ -3,70 +3,6 @@ from datetime import datetime
 from typing import Literal
 
 
-class ReviewItem(BaseModel):
-    severity: str = "info"
-    location: str = ""
-    original_text: str = ""
-    error_description: str = ""
-    standard_reference: str = ""
-    suggestion: str = ""
-    highlighted: bool = True
-    human_status: str = "pending"
-    human_comment: str = ""
-    annotated_by: str = ""
-    annotated_at: str = ""
-
-
-
-class ReportRecord(BaseModel):
-    id: str | None = None
-    filename: str
-    overall_result: str
-    original_result: str = ""
-    review_items: list[ReviewItem] = Field(default_factory=list)
-    highlighted_html: str = ""
-    created_at: str | None = None
-    employee_id: str = ""
-    uploader_name: str = ""
-    group_id: str = ""
-    comparison: str = ""
-    compared_with: str = ""
-    tags: str = ""
-
-
-class ReportListResponse(BaseModel):
-    reports: list[ReportRecord]
-    total: int
-
-
-# ── Full-text search models ─────────────────────────────────────────
-
-class SearchSnippets(BaseModel):
-    location: str = ""
-    original_text: str = ""
-    error_description: str = ""
-    standard_reference: str = ""
-    suggestion: str = ""
-
-
-class SearchResult(BaseModel):
-    report_id: str
-    filename: str
-    overall_result: str
-    created_at: str = ""
-    employee_id: str = ""
-    uploader_name: str = ""
-    snippets: SearchSnippets = SearchSnippets()
-    match_count: int = 0
-    rank: float = 0.0
-
-
-class SearchResponse(BaseModel):
-    results: list[SearchResult]
-    total: int
-    query: str
-
-
 
 class AuditLogEntry(BaseModel):
     id: int
@@ -88,83 +24,6 @@ class AuditLogListResponse(BaseModel):
     total: int
 
 
-# ── Statistics models ──────────────────────────────────────────────
-
-class StatsOverview(BaseModel):
-    total_reports: int
-    total_issues: int
-    pass_rate: float
-    avg_issues_per_report: float
-    avg_duration_ms: int
-
-
-class SeverityDist(BaseModel):
-    error: int = 0
-    warning: int = 0
-    info: int = 0
-
-
-class DailyTrend(BaseModel):
-    date: str
-    uploads: int
-    pass_count: int
-    fail_count: int
-
-
-class TopLocation(BaseModel):
-    location: str
-    count: int
-
-
-class StatsResponse(BaseModel):
-    overview: StatsOverview
-    pass_fail: dict[str, int]
-    severity_dist: SeverityDist
-    trends: list[DailyTrend]
-    top_locations: list[TopLocation]
-    top_actions: dict[str, int]
-
-
-# ── Review rules models ──────────────────────────────────────────────
-
-class ReviewRule(BaseModel):
-    id: str = ""
-    name: str
-    description: str = ""
-    category: str = "other"  # limit / consistency / logic / format / other
-    severity: str = "warning"  # error / warning / info
-    keywords: list[str] = Field(default_factory=list)
-    pattern: str = ""
-    standard_id: str = ""
-    suggestion_template: str = ""
-    enabled: bool = True
-    created_at: str = ""
-    updated_at: str = ""
-
-
-class RuleCreateRequest(BaseModel):
-    name: str
-    description: str = ""
-    category: str = "other"
-    severity: str = "warning"
-    keywords: list[str] = Field(default_factory=list)
-    pattern: str = ""
-    standard_id: str = ""
-    suggestion_template: str = ""
-    enabled: bool = True
-
-
-class RuleUpdateRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    category: str | None = None
-    severity: str | None = None
-    keywords: list[str] | None = None
-    pattern: str | None = None
-    standard_id: str | None = None
-    suggestion_template: str | None = None
-    enabled: bool | None = None
-
 
 # ── EMC standards models ─────────────────────────────────────────────
 
@@ -184,7 +43,30 @@ class EmcStandard(BaseModel):
     version: str = ""
     clauses: list[StandardClause] = Field(default_factory=list)
     is_builtin: bool = False
+    normalized_code: str = ""
+    source_filename: str = ""
+    file_sha256: str = ""
+    page_count: int = 0
+    knowledge_status: str = "manual"  # manual | pending | processing | ready | failed
+    knowledge_error: str = ""
+    knowledge_meta: dict = Field(default_factory=dict)
+    chunk_count: int = 0
+    graph_status: str = "not_started"  # not_started | extracting | pending_review | published | failed
+    graph_error: str = ""
+    graph_meta: dict = Field(default_factory=dict)
+    graph_clause_count: int = 0
+    graph_requirement_count: int = 0
+    graph_pending_count: int = 0
+    graph_confirmed_count: int = 0
+    graph_rejected_count: int = 0
+    latest_release_id: str = ""
+    latest_release_number: int = 0
+    release_count: int = 0
+    selected_release_id: str = ""
+    selected_release_number: int = 0
+    created_by: str = ""
     created_at: str = ""
+    updated_at: str = ""
 
 
 class StandardCreateRequest(BaseModel):
@@ -201,11 +83,121 @@ class StandardListResponse(BaseModel):
     total: int
 
 
+class StandardKnowledgeChunk(BaseModel):
+    id: str = ""
+    standard_id: str = ""
+    chunk_index: int = 0
+    clause: str = ""
+    title: str = ""
+    page_start: int = 0
+    page_end: int = 0
+    content: str = ""
+    structured: dict = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class StandardRequirementParameter(BaseModel):
+    id: str = ""
+    name: str = ""
+    symbol: str = ""
+    comparator: str = ""
+    value: str = ""
+    value_min: str = ""
+    value_max: str = ""
+    unit: str = ""
+    raw_text: str = ""
+
+
+class StandardGraphRequirement(BaseModel):
+    id: str = ""
+    standard_id: str = ""
+    clause_id: str = ""
+    clause_number: str = ""
+    clause_title: str = ""
+    requirement_type: str = "other"
+    test_item: str = ""
+    statement: str = ""
+    original_statement: str = ""
+    interpretation_zh: str = ""
+    interpretation_status: str = "pending"
+    applicability: str = ""
+    evidence_quote: str = ""
+    page_start: int = 0
+    page_end: int = 0
+    source_chunk_id: str = ""
+    confidence: float = 0.0
+    review_status: str = "pending"
+    review_comment: str = ""
+    reviewed_by: str = ""
+    reviewed_at: str = ""
+    parameters: list[StandardRequirementParameter] = Field(default_factory=list)
+    relations: list[dict] = Field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class StandardGraphRelease(BaseModel):
+    id: str = ""
+    standard_id: str = ""
+    release_number: int = 0
+    status: str = "published"
+    source_file_sha256: str = ""
+    embedding_model: str = ""
+    prompt_version: str = ""
+    requirement_count: int = 0
+    published_by: str = ""
+    published_at: str = ""
+
+
+class StandardGraphClause(BaseModel):
+    id: str = ""
+    standard_id: str = ""
+    clause_number: str = ""
+    title: str = ""
+    parent_clause_number: str = ""
+    page_start: int = 0
+    page_end: int = 0
+    source_chunk_id: str = ""
+    requirements: list[StandardGraphRequirement] = Field(default_factory=list)
+
+
+class StandardRequirementReviewRequest(BaseModel):
+    review_status: str
+    comment: str = ""
+    clause_number: str | None = None
+    clause_title: str | None = None
+    requirement_type: str | None = None
+    test_item: str | None = None
+    statement: str | None = None
+    interpretation_zh: str | None = None
+    applicability: str | None = None
+    parameters: list[StandardRequirementParameter] | None = None
+
+
+class DocumentSetStandardsUpdate(BaseModel):
+    standard_ids: list[str] = Field(default_factory=list)
+    skips: list[dict[str, str]] = Field(default_factory=list)
+
+
+class DocumentSetProjectGroupUpdate(BaseModel):
+    project_group_id: str = ""
+
+
+class StandardRequirementMappingRequest(BaseModel):
+    release_id: str
+    source_name: str
+    mapping_type: str = "covered"  # covered | not_covered
+    requirement_id: str = ""
+    scope_type: str = "standard"  # standard | project | set
+    scope_value: str = ""
+    rationale: str = ""
+
+
 # ── Auth / User models ─────────────────────────────────────────────
 
 class User(BaseModel):
     employee_id: str
-    role: str  # admin | reviewer | viewer
+    role: str  # admin | reviewer | standard_reviewer | viewer
     name: str = ""
     created_at: str = ""
 
@@ -221,12 +213,12 @@ class LoginResponse(BaseModel):
 
 class UserCreateRequest(BaseModel):
     employee_id: str
-    role: str = "viewer"
+    role: Literal["admin", "reviewer", "standard_reviewer", "viewer"] = "viewer"
     name: str = ""
 
 
 class UserUpdateRoleRequest(BaseModel):
-    role: str
+    role: Literal["admin", "reviewer", "standard_reviewer", "viewer"]
 
 
 class UpdateNameRequest(BaseModel):
@@ -247,25 +239,6 @@ class SystemSettings(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     settings: dict[str, str]
 
-
-# ── Admin stats model ─────────────────────────────────────────────────
-
-class AdminStatsResponse(BaseModel):
-    overview: StatsOverview
-    pass_fail: dict[str, int]
-    severity_dist: SeverityDist
-    trends: list[DailyTrend]
-    top_locations: list[TopLocation]
-    top_actions: dict[str, int]
-    total_users: int = 0
-    today_uploads: int = 0
-    recent_activity: list[AuditLogEntry] = Field(default_factory=list)
-
-
-class AnnotationUpdateRequest(BaseModel):
-    human_status: str
-    human_comment: str = ""
-    since: str = ""  # client's last-known state timestamp for conflict detection (future: compare with annotated_at to reject stale writes)
 
 
 # ── Tag models ──────────────────────────────────────────────────────
@@ -397,8 +370,12 @@ class SetDocument(BaseModel):
     upload_order: int = 0
     plain_text: str = ""          # extracted text content (cached)
     html_content: str = ""        # HTML rendering (cached)
-    extraction_status: str = "pending"  # pending | extracting | done | failed
+    extraction_status: str = "pending"  # pending | extracting | done | partial | failed
+    extraction_quality: str = "pending"  # pending | complete | partial | failed
+    extraction_meta: dict = Field(default_factory=dict)
     extraction_error: str = ""    # error message when extraction_status == 'failed'
+    reviewed_by: str = ""
+    reviewed_at: str = ""
     created_at: str = ""
 
 
@@ -417,6 +394,8 @@ class DocumentSet(BaseModel):
     documents: list[SetDocument] = Field(default_factory=list)
     created_at: str = ""
     employee_id: str = ""
+    project_group_id: str = ""
+    project_group_name: str = ""
     missing_types: list[DocType] = Field(default_factory=list)  # computed
 
 
@@ -458,11 +437,16 @@ class TestPlanBasicInfo(BaseModel):
 class TestPlanItem(BaseModel):
     code: str = ""; name: str = ""; is_executed: str = ""
     test_mode: str = ""; standard_clause: str = ""; acceptance: str = ""
+    sample_requirements: dict[str, str] = Field(default_factory=dict)
+    source_quote: str = ""
+    source_location: str = ""
 
 
 class TestPlanDetail(BaseModel):
     code: str = ""
     fields: dict[str, str] = Field(default_factory=dict)
+    source_quote: str = ""
+    source_location: str = ""
 
 
 class TestPlanData(BaseModel):
@@ -470,6 +454,9 @@ class TestPlanData(BaseModel):
     test_items: list[TestPlanItem] = Field(default_factory=list)
     test_details: list[TestPlanDetail] = Field(default_factory=list)
     raw_text: str = ""
+    extraction_quality: str = "complete"
+    failed_passes: list[str] = Field(default_factory=list)
+    extraction_metrics: dict = Field(default_factory=dict)
 
 
 # ── Report (检测报告) extraction models ──────────────────────────────
@@ -567,6 +554,9 @@ class ReportData(BaseModel):
     # v3: per-item extractions (populated when using universal extractor)
     item_extractions: list["TestItemExtraction"] = Field(default_factory=list)
     code_validation_issues: list["ValidationIssue"] = Field(default_factory=list)
+    extraction_quality: str = "complete"
+    failed_passes: list[str] = Field(default_factory=list)
+    extraction_metrics: dict = Field(default_factory=dict)
 
 
 # ── v3 Universal extraction models (per-test-item, type-aware) ──────────
@@ -645,36 +635,3 @@ class ValidationIssue(BaseModel):
     expected: str = ""
     actual: str = ""
     row_index: int = -1              # 0-based, -1 = not applicable
-
-
-# ── Pipeline validation models ────────────────────────────────────────
-
-class PipelineValidationIssue(BaseModel):
-    """A single cross-document discrepancy found by the pipeline.
-
-    Distinct from ReviewItem (which is for 2-stage AI review output).
-    This model captures the source documents, their values, and the
-    validation logic that flagged the discrepancy.
-    """
-    id: str = ""
-    severity: str = "CRITICAL"    # CRITICAL | WARNING | INFO
-    category: str = ""            # coverage | basic_info | instrument | date | method | toc
-    field_name: str = ""          # which field is discrepant
-    description: str = ""         # human-readable description
-    source_step: str = ""         # Step1 | Step2 | Step3 | Step4
-    validation_type: str = ""     # deterministic | ai | hybrid
-    sources: dict[str, str] = Field(default_factory=dict)  # {"委托单":"12V","报告":"13.5V"}
-    resolution: str = ""          # suggested fix
-    source: str = "deterministic"  # deterministic | llm — which layer found this issue
-    # Human annotation (same pattern as ReviewItem)
-    human_status: str = "pending"  # pending | confirmed | ignored
-    human_comment: str = ""
-    annotated_by: str = ""
-    annotated_at: str = ""
-    set_id: str = ""              # which DocumentSet this belongs to
-
-
-class AnnotationUpdate(BaseModel):
-    """Request to annotate a pipeline validation issue."""
-    human_status: str  # pending | confirmed | ignored
-    human_comment: str = ""

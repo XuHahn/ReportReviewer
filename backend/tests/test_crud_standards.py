@@ -2,6 +2,7 @@
 
 import json as json_mod
 import pytest
+import database
 from tests.utils import assert_api_db, assert_log_chain, extract_req_id
 
 
@@ -24,8 +25,8 @@ _STANDARD_PAYLOAD = {
 
 class TestStandardCreate:
 
-    async def test_create_standard_api_matches_db(self, reviewer_client, db_conn, read_backend_logs):
-        res = await reviewer_client.post("/api/standards", json=_STANDARD_PAYLOAD)
+    async def test_create_standard_api_matches_db(self, standard_reviewer_client, db_conn, read_backend_logs):
+        res = await standard_reviewer_client.post("/api/standards", json=_STANDARD_PAYLOAD)
         assert res.status_code == 200, res.text
         data = res.json()
         req_id = extract_req_id(res)
@@ -79,13 +80,46 @@ class TestStandardRead:
         assert_api_db(body["title"], db_row["title"], "title")
 
 
+class TestStandardFileResponses:
+
+    async def test_pdf_preview_is_inline_while_original_file_is_attachment(self, reviewer_client):
+        pdf_bytes = b"%PDF-1.4\n% preview response test\n"
+        standard_id, _ = database.create_standard_asset(
+            pdf_bytes, "ISO \u6d4b\u8bd5\u6807\u51c6.pdf", code="ISO PREVIEW TEST", version="2026",
+        )
+
+        preview = await reviewer_client.get(f"/api/standards/{standard_id}/preview")
+        assert preview.status_code == 200
+        assert preview.headers["content-type"] == "application/pdf"
+        assert preview.headers["content-disposition"].startswith("inline;")
+        assert preview.headers["x-content-type-options"] == "nosniff"
+        assert preview.content == pdf_bytes
+
+        download = await reviewer_client.get(f"/api/standards/{standard_id}/file")
+        assert download.status_code == 200
+        assert download.headers["content-type"] == "application/octet-stream"
+        assert download.headers["content-disposition"].startswith("attachment;")
+        assert download.content == pdf_bytes
+
+    async def test_non_pdf_standard_cannot_use_pdf_preview(self, reviewer_client):
+        standard_id, _ = database.create_standard_asset(
+            b"plain text standard", "plain-standard.txt",
+            code="TEXT PREVIEW TEST", version="2026",
+        )
+
+        response = await reviewer_client.get(f"/api/standards/{standard_id}/preview")
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "当前标准不是可预览的 PDF 文件"
+
+
 class TestStandardDelete:
 
-    async def test_delete_custom_standard_removes_from_db(self, reviewer_client, db_conn, read_backend_logs):
-        res = await reviewer_client.post("/api/standards", json=_STANDARD_PAYLOAD)
+    async def test_delete_custom_standard_removes_from_db(self, standard_reviewer_client, db_conn, read_backend_logs):
+        res = await standard_reviewer_client.post("/api/standards", json=_STANDARD_PAYLOAD)
         std_id = res.json()["id"]
 
-        res2 = await reviewer_client.delete(f"/api/standards/{std_id}")
+        res2 = await standard_reviewer_client.delete(f"/api/standards/{std_id}")
         assert res2.status_code == 200, res2.text
         req_id = extract_req_id(res2)
 
@@ -96,13 +130,13 @@ class TestStandardDelete:
 
         assert_log_chain(req_id, read_backend_logs)
 
-    async def test_cannot_delete_builtin_standard(self, reviewer_client):
-        res = await reviewer_client.get("/api/standards")
+    async def test_cannot_delete_builtin_standard(self, standard_reviewer_client):
+        res = await standard_reviewer_client.get("/api/standards")
         standards = res.json()
         builtins = [s for s in standards if s.get("is_builtin")]
         if not builtins:
             pytest.skip("No builtin standards available")
         std_id = builtins[0]["id"]
 
-        res2 = await reviewer_client.delete(f"/api/standards/{std_id}")
+        res2 = await standard_reviewer_client.delete(f"/api/standards/{std_id}")
         assert res2.status_code != 200, f"Should not delete builtin, got {res2.status_code}"

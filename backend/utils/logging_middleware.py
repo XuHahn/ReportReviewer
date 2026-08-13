@@ -18,24 +18,31 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         start = time.time()
         client_ip = request.client.host if request.client else "unknown"
 
-        response: Response = await call_next(request)
+        try:
+            response: Response = await call_next(request)
+            elapsed_ms = int((time.time() - start) * 1000)
+            path = request.url.path
+            method = request.method
+            status = response.status_code
+            response.headers["X-Request-Id"] = req_id
 
-        elapsed_ms = int((time.time() - start) * 1000)
-        path = request.url.path
-        method = request.method
-        status = response.status_code
-
-        response.headers["X-Request-Id"] = req_id
-
-        if status >= 500:
-            _log.error("request completed", method=method, path=path, status=status,
-                        durationMs=elapsed_ms, clientIp=client_ip)
-        elif status >= 400:
-            _log.warning("request completed", method=method, path=path, status=status,
+            log_method = _log.error if status >= 500 else (
+                _log.warning if status >= 400 else _log.info
+            )
+            log_method("request completed", method=method, path=path, status=status,
                        durationMs=elapsed_ms, clientIp=client_ip)
-        else:
-            _log.info("request completed", method=method, path=path, status=status,
-                       durationMs=elapsed_ms, clientIp=client_ip)
-
-        structlog.contextvars.unbind_contextvars("reqId")
-        return response
+            return response
+        except Exception as exc:
+            elapsed_ms = int((time.time() - start) * 1000)
+            _log.exception(
+                "request failed",
+                method=request.method,
+                path=request.url.path,
+                status=500,
+                durationMs=elapsed_ms,
+                clientIp=client_ip,
+                error=str(exc)[:500],
+            )
+            raise
+        finally:
+            structlog.contextvars.unbind_contextvars("reqId")

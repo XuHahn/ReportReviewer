@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>审核任务工作台 — 优化：上传卡片嵌入 detail panel</title>
+<!-- ═══════════════════ 全部取自现有 index.css，未改任何样式 ═══════════════════ -->
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #edf0f3; color: #172033; -webkit-font-smoothing: antialiased; font-size:14px;
+}
+
+/* ══ Sidebar（现有） ══ */
+.app-layout { display: flex; height: 100vh; }
+.app-side { width: 56px; background: #111827; color: #fff; display: flex; flex-direction: column; transition: width .25s cubic-bezier(.4,0,.2,1); overflow: hidden; flex-shrink: 0; z-index: 10; }
+.app-side:hover { width: 200px; box-shadow: 4px 0 24px rgba(0,0,0,.15); }
+.side-logo { display: flex; align-items: center; gap: 12px; padding: 16px 14px; white-space: nowrap; }
+.side-logo-text { font-size: 14px; font-weight: 700; opacity: 0; transition: opacity .15s .05s; }
+.app-side:hover .side-logo-text { opacity: 1; }
+.side-nav { flex: 1; display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; }
+.side-item { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; border: none; background: transparent; color: #9ca3af; font-size: 13px; transition: background .15s; text-align: left; width: 100%; }
+.side-item:hover { background: rgba(255,255,255,.06); color: #e5e7eb; }
+.side-item-on { background: #2563eb; color: #fff; }
+.side-icon { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.side-label { opacity: 0; transition: opacity .15s; }
+.app-side:hover .side-label { opacity: 1; }
+.side-user { display: flex; align-items: center; gap: 10px; padding: 12px; border-top: 1px solid rgba(255,255,255,.06); white-space: nowrap; font-size: 12px; color: #9ca3af; }
+.side-avatar { width: 28px; height: 28px; border-radius: 50%; background: #374151; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 600; font-size: 12px; }
+.side-user-info { display: flex; flex-direction: column; flex: 1; min-width: 0; opacity: 0; transition: opacity .15s; }
+.app-side:hover .side-user-info { opacity: 1; }
+.side-user-name { font-weight: 500; font-size: 13px; color: #e5e7eb; overflow: hidden; text-overflow: ellipsis; }
+.side-user-role { font-size: 11px; color: #6b7280; }
+.side-logout { background: none; border: none; color: #6b7280; cursor: pointer; padding: 4px; opacity: 0; transition: opacity .15s; }
+.app-side:hover .side-logout { opacity: 1; }
+.side-logout:hover { color: #e5e7eb; }
+
+/* ══ Main（现有） ══ */
+.app-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #edf0f3; }
+.main-topbar { padding: 12px 24px; border-bottom: 1px solid #e4e7ec; background: #fff; display: flex; align-items: center; font-size: 14px; font-weight: 600; color: #1f2937; }
+.main-content { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+/* ══ 工作台（全部现有 CSS，逐行复制自 index.css） ══ */
+.task-workbench { width: 100%; max-width: 1600px; margin: 0 auto; color: #172033; font-size: 14px; }
+.task-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 8px 2px 24px; }
+.task-hero h1 { font: 700 30px/1.2 ui-serif, Georgia, 'Noto Serif SC', serif; letter-spacing: -.02em; margin: 5px 0 8px; }
+.task-hero p, .task-panel-head p, .task-detail-head p { color: #687386; font-size: 14px; }
+.task-eyebrow { color: #176b5b; font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+.task-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 10px; background: #176b5b; color: white; padding: 11px 17px; font-weight: 700; cursor: pointer; box-shadow: 0 7px 18px rgba(23,107,91,.16); }
+.task-primary:hover { background: #10594c; }
+.task-primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.task-detail-actions { display: flex; align-items: center; gap: 9px; }
+.task-secondary { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #cfd8df; border-radius: 10px; background: #fff; color: #344657; padding: 10px 15px; font-weight: 700; cursor: pointer; }
+.task-secondary:hover { border-color: #176b5b; color: #176b5b; background: #f3faf7; }
+.task-back { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: #176b5b; font-weight: 700; margin-bottom: 16px; cursor: pointer; }
+.task-metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-bottom: 18px; }
+.task-metrics > div { position: relative; overflow: hidden; background: #fff; border: 1px solid #e4e8ed; border-radius: 14px; padding: 17px 18px; box-shadow: 0 7px 22px rgba(31,42,55,.04); }
+.task-metrics > div::after { content: ''; position: absolute; right: -18px; bottom: -25px; width: 74px; height: 74px; border-radius: 50%; background: #e7f3ef; }
+.task-metrics span, .task-metrics small { display: block; color: #758093; font-size: 12px; }
+.task-metrics strong { display: block; font: 700 27px/1.3 ui-serif, Georgia, serif; margin: 4px 0; }
+.task-grid { display: grid; grid-template-columns: minmax(270px, .72fr) minmax(620px, 1.8fr); gap: 16px; align-items: start; }
+.task-grid.review-active { grid-template-columns: 1fr; }
+.task-grid.review-active .task-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(250px,1fr)); max-height: 176px; }
+.task-list-panel, .task-detail-panel { background: #fff; border: 1px solid #e1e6eb; border-radius: 16px; box-shadow: 0 10px 32px rgba(28,39,52,.05); overflow: hidden; }
+.task-panel-head, .task-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 19px 20px; border-bottom: 1px solid #edf0f3; }
+.task-panel-head h2, .task-detail-head h2 { font-size: 17px; margin-bottom: 3px; }
+.task-list { max-height: 620px; overflow-y: auto; padding: 7px; }
+.task-row { width: 100%; border: 1px solid transparent; background: transparent; border-radius: 11px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; }
+.task-row:hover { background: #f7f9fa; }
+.task-row.active { background: #eff7f4; border-color: #cce2db; }
+.task-row-main { min-width: 0; }
+.task-row-main b, .task-row-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-row-main b { font-size: 14px; }
+.task-row-main small { margin-top: 5px; color: #7b8698; font-size: 12px; }
+.task-status { display: inline-flex; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.task-status.success, .finding-card.success .finding-title > span { color: #11705c; background: #e5f5ef; }
+.task-status.warning, .finding-card.warning .finding-title > span { color: #9a5c05; background: #fff1d7; }
+.task-status.danger, .finding-card.danger .finding-title > span { color: #a3312a; background: #fde8e6; }
+.task-status.neutral { color: #586579; background: #edf0f4; }
+.task-detail-head { padding: 21px 22px; }
+.task-lifecycle { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 0; padding: 13px 22px; border-bottom: 1px solid #edf0f3; background: #fbfcfd; }
+.task-lifecycle > div { position: relative; display: flex; align-items: center; gap: 7px; color: #8a95a4; font-size: 12px; }
+.task-lifecycle > div:not(:last-child)::after { content: ''; height: 1px; flex: 1; margin-right: 8px; background: #dce2e8; }
+.task-lifecycle span { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border: 1px solid #cfd7df; border-radius: 50%; background: #fff; font-size: 9px; font-weight: 800; }
+.task-lifecycle b { white-space: nowrap; }
+.task-lifecycle .done { color: #176b5b; }.task-lifecycle .done span { border-color: #176b5b; background: #e9f5f1; }.task-lifecycle .done::after { background: #93c8b9 !important; }
+.task-lifecycle .current { color: #9a650d; }.task-lifecycle .current span { border-color: #d9a33f; background: #fff5dd; }
+.task-files { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; padding: 14px 20px; border-bottom: 1px solid #edf0f3; }
+.task-file { min-width: 0; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 10px; background: #f8fafb; border-radius: 10px; }
+.task-file-dot { width: 8px; height: 8px; border-radius: 50%; background: #cad1da; }
+.task-file-dot.ready { background: #1b8b71; box-shadow: 0 0 0 4px #e1f2ed; }
+.task-file b, .task-file small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-file b { font-size: 13px; }.task-file b i { color: #8993a2; font-style: normal; font-weight: 500; }
+.task-file small, .task-file em { color: #7b8698; font-size: 11px; font-style: normal; }
+.run-summary { display: grid; grid-template-columns: 1.7fr repeat(4,1fr); gap: 1px; background: #e9edf0; border-bottom: 1px solid #e9edf0; }
+.run-summary > div { background: #fff; padding: 13px 15px; }
+.run-summary span, .run-summary strong, .run-summary b { display: block; }
+.run-summary span { color: #8290a0; font-size: 11px; margin-bottom: 5px; }.run-summary strong { font-size: 19px; }
+.review-export-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 20px; border-bottom: 1px solid #edf0f3; background: #fbfcfd; }.review-export-bar span { margin-right: auto; color: #8290a0; font-size: 10px; font-weight: 700; }.review-export-bar button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #ccd7e0; border-radius: 7px; background: #fff; color: #345b7a; padding: 7px 10px; font-size: 10px; font-weight: 650; cursor: pointer; }.review-export-bar button:hover { border-color: #345b7a; }
+.danger-text { color: #ad3027; }.warning-text { color: #aa6809; }
+.task-empty { padding: 38px 20px; text-align: center; color: #8590a0; font-size: 12px; }
+.task-alert { margin-bottom: 14px; padding: 11px 14px; background: #fff1ef; border: 1px solid #f2c8c3; color: #a3312a; border-radius: 10px; font-size: 12px; }
+
+@media (max-width: 1100px) { .task-grid { grid-template-columns: 1fr; }.task-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(230px,1fr)); max-height: 190px; }.task-metrics { grid-template-columns: repeat(4,1fr); } }
+
+/* ══ ★ 文档上传卡片（与 DocumentSetUploader 中 card 样式一致） ★ ══ */
+.doc-card-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; padding: 16px 20px; border-bottom: 1px solid #edf0f3; }
+.doc-card { position: relative; text-align: center; padding: 18px 12px 14px; border-radius: 13px; cursor: pointer; transition: .18s; border: 2px dashed #d0d8e0; background: #fbfcfd; }
+.doc-card:hover { border-color: #176b5b; background: #f5faf8; }
+.doc-card.filled { border-style: solid; border-color: #b9d8cf; background: #f8fdfb; }
+.doc-card .d-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; }
+.doc-card h4 { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.doc-card .hint { font-size: 11px; color: #8993a2; margin-bottom: 10px; }
+.doc-card .req-tag { position: absolute; top: 9px; right: 9px; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: #fef2f2; color: #dc2626; }
+.doc-card .fname { margin-top: 8px; font-size: 11px; color: #586579; background: #f1f4f7; border-radius: 6px; padding: 5px 8px; word-break: break-all; line-height: 1.5; }
+.doc-card .fname strong { display: block; color: #172033; font-size: 12px; margin-bottom: 2px; }
+
+.doc-lock-bar { display: flex; align-items: center; gap: 10px; padding: 11px 20px; border-bottom: 1px solid #cce2db; background: #f3faf7; font-size: 13px; color: #176b5b; }
+.doc-lock-bar .lock-btn { margin-left: auto; }
+
+/* ══ 审核进度（审核中时替换 lifecycle + files 区域） ══ */
+.review-progress-panel { padding: 18px 22px; border-bottom: 1px solid #edf0f3; background: #fbfcfd; }
+.review-progress-panel .prog-head { display: flex; align-items: center; gap: 12px; font-size: 13px; margin-bottom: 10px; }
+.review-progress-panel .prog-track { height: 4px; background: #e5eaee; border-radius: 2px; overflow: hidden; }
+.review-progress-panel .prog-fill { height: 100%; background: #176b5b; border-radius: 2px; transition: width .8s ease; }
+
+/* ══ 审核问题区域（现有 .review-issue-shell，完全不动） ══ */
+/* 用占位示意 ReviewIssueWorkspace 原样保留 */
+.ri-placeholder { padding: 30px 20px; border-bottom: 1px solid #edf0f3; }
+.ri-placeholder .ri-mock-top { display: flex; align-items: center; gap: 18px; margin-bottom: 16px; }
+.ri-placeholder .ri-mock-stat { padding: 10px 16px; border: 1px solid #e4e8ed; border-radius: 10px; text-align: center; }
+.ri-placeholder .ri-mock-stat b { display: block; font-size: 20px; }
+.ri-placeholder .ri-mock-stat span { font-size: 11px; color: #8290a0; }
+.ri-placeholder .ri-mock-split { display: grid; grid-template-columns: 280px 1fr; gap: 14px; }
+.ri-placeholder .ri-mock-queue { border: 1px solid #e4e8ed; border-radius: 10px; padding: 12px; }
+.ri-placeholder .ri-mock-queue .item { padding: 10px; margin-bottom: 6px; border-radius: 8px; border-left: 3px solid #c3483e; background: #fef2f2; }
+.ri-placeholder .ri-mock-queue .item.warn { border-left-color: #d08a22; background: #fffbeb; }
+.ri-placeholder .ri-mock-queue .item h5 { font-size: 13px; }
+.ri-placeholder .ri-mock-queue .item p { font-size: 11px; color: #687386; margin-top: 3px; }
+.ri-placeholder .ri-mock-detail { border: 1px solid #e4e8ed; border-radius: 10px; padding: 16px; }
+.ri-placeholder .ri-mock-detail .block { padding: 12px; margin-bottom: 8px; border-radius: 8px; background: #f8fafb; border-left: 3px solid #25866f; font-size: 12px; }
+.ri-placeholder .ri-mock-detail .block h5 { font-size: 13px; margin-bottom: 5px; }
+
+.ri-caption { padding: 8px 22px; font-size: 11px; color: #176b5b; font-weight: 600; background: #fbfcfd; border-bottom: 1px solid #edf0f3; }
+
+.toggle-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #687386; cursor: pointer; }
+.toggle-knob { width: 32px; height: 18px; border-radius: 9px; background: #cad1da; position: relative; transition: background .2s; }
+.toggle-knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.toggle-knob.on { background: #176b5b; }
+.toggle-knob.on::after { left: 16px; }
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+<!-- ═══════════════ SIDEBAR（现有，不动） ═══════════════ -->
+<aside class="app-side">
+  <div class="side-logo">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    <span class="side-logo-text">EMC 报告审核</span>
+  </div>
+  <nav class="side-nav">
+    <button class="side-item side-item-on"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="4" width="18" height="16" rx="3" fill="currentColor" opacity=".14"/><path d="M7 9h10M7 13h6M7 17h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span><span class="side-label">审核任务</span></button>
+    <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="5" y="3" width="14" height="18" rx="2" fill="currentColor" opacity=".12" stroke="currentColor" stroke-width="1.5"/></svg></span><span class="side-label">标准库</span></button>
+    <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="14" width="4" height="7" rx="1" fill="currentColor" opacity=".3"/><rect x="10" y="9" width="4" height="12" rx="1" fill="currentColor" opacity=".55"/><rect x="17" y="4" width="4" height="17" rx="1" fill="currentColor"/></svg></span><span class="side-label">运行分析</span></button>
+  </nav>
+  <div class="side-user">
+    <div class="side-avatar">E</div>
+    <div class="side-user-info"><span class="side-user-name">Ethan</span><span class="side-user-role">审核员</span></div>
+    <button class="side-logout"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+  </div>
+</aside>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<main class="app-main">
+  <div class="main-topbar">审核任务</div>
+  <div class="main-content">
+  <div class="task-workbench">
+
+    <!-- ══ Hero + Metrics（现有） ══ -->
+    <header class="task-hero">
+      <div><span class="task-eyebrow">EVIDENCE GRAPH REVIEW</span><h1>审核任务工作台</h1><p>从资料完整性、证据提取到人工裁决，在一个任务中完成。</p></div>
+      <button class="task-primary">+ 新建审核任务</button>
+    </header>
+    <section class="task-metrics">
+      <div><span>需要处理</span><strong>2</strong><small>缺资料、修订或失败</small></div>
+      <div><span>正在运行</span><strong>1</strong><small>提取与审核任务</small></div>
+      <div><span>可以审核</span><strong>3</strong><small>四份资料已锁定</small></div>
+      <div><span>已经完成</span><strong>5</strong><small>可查看与导出</small></div>
+    </section>
+
+    <!-- ══ Grid = 左侧列表 + 右侧详情（现有布局） ══ -->
+    <div class="task-grid">
+
+      <!-- ══ 左：任务列表（现有，不动） ══ -->
+      <section class="task-list-panel">
+        <div class="task-panel-head"><div><h2>审核任务</h2><p>11 个任务</p></div></div>
+        <div class="task-list">
+          <button class="task-row active"><span class="task-row-main"><b>EMC-20260803-5qs8nt</b><small>B26EV项目 · 4 份资料</small></span><span class="task-status warning">待人工确认</span></button>
+          <button class="task-row"><span class="task-row-main"><b>EMC-20260728-a3b2c1</b><small>角雷达模块 · 4 份资料</small></span><span class="task-status success">已完成</span></button>
+          <button class="task-row"><span class="task-row-main"><b>EMC-20260715-x9y8z7</b><small>电源模块 · 3 份资料</small></span><span class="task-status danger">待补资料</span></button>
+          <button class="task-row"><span class="task-row-main"><b>EMC-20260701-d4e5f6</b><small>网关模块 · 4 份资料</small></span><span class="task-status neutral">提取中</span></button>
+        </div>
+      </section>
+
+      <!-- ══ 右：任务详情 ══ -->
+      <section class="task-detail-panel">
+
+        <!-- Detail Header（现有） -->
+        <div class="task-detail-head">
+          <div><span class="task-eyebrow">当前任务</span><h2>EMC-20260803-5qs8nt</h2><p>创建于 2026-08-03 14:30 · B26EV 角雷达控制模块</p></div>
+          <div class="task-detail-actions">
+            <button class="task-secondary">项目组</button>
+            <!-- ★ "编辑资料"不再跳转页面，改为展开下方上传卡片 -->
+            <button class="task-secondary">✎ 编辑资料</button>
+            <button class="task-primary">▶ 开始审核</button>
+          </div>
+        </div>
+
+        <!-- Lifecycle（现有） -->
+        <div class="task-lifecycle">
+          <div class="done"><span>✓</span><b>资料齐套</b></div>
+          <div class="done"><span>✓</span><b>提取核查</b></div>
+          <div class="current"><span>3</span><b>机器审核</b></div>
+          <div><span>4</span><b>人工裁决</b></div>
+          <div><span>5</span><b>归档导出</b></div>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════════════════ -->
+        <!-- ★ 新增：文档上传卡片。                                    ★ -->
+        <!-- ★ 仅在任务状态为 incomplete/revision，或点击"编辑资料"时展开。★ -->
+        <!-- ★ 资料锁定时折叠为下方只读 file 摘要（现有 task-files）。    ★ -->
+        <!-- ════════════════════════════════════════════════════════════════ -->
+        <div class="doc-card-grid">
+          <div class="doc-card filled" title="点击替换">
+            <span class="req-tag">必传</span>
+            <div class="d-icon" style="background:#eef2ff;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="7" y1="9" x2="17" y2="9" opacity=".5"/></svg></div>
+            <h4>委托单</h4><p class="hint">.xls 格式</p>
+            <span class="task-status success" style="font-size:11px;">✓ 已上传</span>
+            <div class="fname"><strong>EE测试申请表E202603209520.pdf</strong>124 KB · 提取完成</div>
+          </div>
+          <div class="doc-card filled" title="点击替换">
+            <span class="req-tag">必传</span>
+            <div class="d-icon" style="background:#ecfdf5;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="7" y="8" width="4" height="4" rx="1" opacity=".5"/></svg></div>
+            <h4>试验计划</h4><p class="hint">PDF / DOCX</p>
+            <span class="task-status success" style="font-size:11px;">✓ 已上传</span>
+            <div class="fname"><strong>B26EV角雷达控制模块-EE测试项.xlsx</strong>86 KB · 提取完成</div>
+          </div>
+          <div class="doc-card filled" title="点击替换">
+            <span class="req-tag">必传</span>
+            <div class="d-icon" style="background:#fff7ed;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="1.5"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20" opacity=".5"/></svg></div>
+            <h4>原始记录</h4><p class="hint">ZIP 压缩包</p>
+            <span class="task-status success" style="font-size:11px;">✓ 已上传</span>
+            <div class="fname"><strong>E202603209520原始记录.zip</strong>2.4 MB · 8 个文件 · 提取完成</div>
+          </div>
+          <div class="doc-card filled" title="点击替换">
+            <span class="req-tag">必传</span>
+            <div class="d-icon" style="background:#eef2ff;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="1.5"><rect x="4" y="2" width="16" height="20" rx="2"/><polyline points="8 12 11 16 16 8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h4>检测报告</h4><p class="hint">PDF / DOCX</p>
+            <span class="task-status success" style="font-size:11px;">✓ 已上传</span>
+            <div class="fname"><strong>E202603209520-1.docx</strong>215 KB · 提取完成</div>
+          </div>
+        </div>
+
+        <!-- Lock bar（上传完显示；未上传完显示缺少哪些 + "锁定"按钮） -->
+        <div class="doc-lock-bar">
+          🔒 四份文档已上传并完成提取核查
+          <span class="lock-btn task-status success" style="font-size:12px;">已锁定</span>
+        </div>
+
+        <!-- 审核中进度（审核中时显示，完成后折叠） -->
+        <div class="review-progress-panel">
+          <div class="prog-head">
+            <span class="task-status warning" style="font-size:12px;">审核中</span>
+            <span style="color:#586579;font-size:13px;">构建证据图 · 47 节点 · 38 关系</span>
+            <span style="margin-left:auto;color:#8290a0;font-size:12px;">运行 #3</span>
+          </div>
+          <div class="prog-track"><div class="prog-fill" style="width:72%;"></div></div>
+        </div>
+
+        <!-- Run Summary（审核完成后，现有） -->
+        <div class="run-summary">
+          <div><span>最新运行</span><b class="task-status warning">待人工确认</b></div>
+          <div><span>节点</span><strong>47</strong></div><div><span>关系</span><strong>38</strong></div>
+          <div><span>确定问题</span><strong class="danger-text">3</strong></div><div><span>待确认</span><strong class="warning-text">5</strong></div>
+        </div>
+
+        <!-- Export bar（审核完成后，现有） -->
+        <div class="review-export-bar">
+          <span>导出本次审核</span>
+          <button>PDF 报告</button>
+          <button>Excel 明细</button>
+          <button>证据包 ZIP</button>
+        </div>
+
+        <!-- ════════════════════════════════════════════════════════════════ -->
+        <!-- ★ ReviewIssueWorkspace：现有问题审核面板，完全不动 ★ -->
+        <!-- ════════════════════════════════════════════════════════════════ -->
+        <div class="ri-placeholder">
+          <div class="ri-mock-top">
+            <div><h2 style="font-size:17px;margin-bottom:3px;">审核问题</h2><p style="color:#687386;font-size:14px;">逐条确认处理方式；全部完成后统一退回修订</p></div>
+            <div style="display:flex;gap:14px;margin-left:auto;">
+              <div class="ri-mock-stat" style="border-left:3px solid #c3483e;"><span>需要处理</span><b style="color:#c3483e;">3</b></div>
+              <div class="ri-mock-stat" style="border-left:3px solid #d08a22;"><span>需要确认</span><b style="color:#d08a22;">5</b></div>
+              <div class="ri-mock-stat" style="border-left:3px solid #25866f;"><span>证据链完整</span><b style="color:#25866f;">4</b></div>
+            </div>
+          </div>
+
+          <!-- 审核规则执行情况（现有 details 折叠面板） -->
+          <details style="margin-bottom:16px;padding:12px 14px;background:#f8fafb;border-radius:8px;cursor:pointer;">
+            <summary style="font-weight:700;font-size:13px;">审核规则执行情况 — 已检查 22 · 有问题 8 · 系统未完成 2</summary>
+          </details>
+
+          <!-- 处理进度条 -->
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:10px 14px;background:#fbfcfd;border-radius:8px;border:1px solid #edf0f3;">
+            <span style="font-size:12px;color:#8290a0;">处理进度</span><b style="font-size:13px;">2 / 8</b>
+            <div style="flex:1;height:4px;background:#e5eaee;border-radius:2px;"><div style="width:25%;height:100%;background:#176b5b;border-radius:2px;"></div></div>
+            <button style="border:1px solid #cfd8df;border-radius:10px;background:#fff;color:#344657;padding:8px 14px;font-weight:700;cursor:pointer;font-size:12px;" disabled>统一退回修订 · 2 项</button>
+          </div>
+
+          <!-- 问题双栏：左队列 + 右详情 -->
+          <div class="ri-mock-split">
+            <!-- 左：问题队列 -->
+            <div class="ri-mock-queue">
+              <div style="display:flex;gap:6px;margin-bottom:10px;">
+                <span style="padding:4px 8px;border-radius:10px;font-size:11px;font-weight:650;background:#176b5b;color:#fff;">待处理 8</span>
+                <span style="padding:4px 8px;border-radius:10px;font-size:11px;font-weight:650;background:#edf0f4;color:#586579;">全部 12</span>
+                <span style="padding:4px 8px;border-radius:10px;font-size:11px;font-weight:650;background:#edf0f4;color:#586579;">已闭合 4</span>
+              </div>
+              <div class="item"><h5>检测报告未填写完整试验日期区间</h5><p>报告缺少可用的试验开始与结束日期…</p></div>
+              <div class="item"><h5>检测报告编制、审核和批准信息为空</h5><p>报告签署区三个角色标签连续出现…</p></div>
+              <div class="item warn"><h5>供电电压缓升缓降试验汇总为通过，但未确认到明细判定</h5><p>明细结果表格系统未能完整读取…</p></div>
+              <div class="item warn"><h5>供电电压缓升缓降试验多个判定等级</h5><p>同一计划项目同时出现 A、C 级…</p></div>
+            </div>
+            <!-- 右：问题详情 -->
+            <div class="ri-mock-detail">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div style="width:32px;height:32px;border-radius:50%;background:#fde8e6;color:#c3483e;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;">!</div>
+                <div><span class="task-status danger" style="font-size:11px;">需要处理</span><h2 style="font-size:15px;">检测报告未填写完整试验日期区间</h2></div>
+                <span style="margin-left:auto;color:#8290a0;font-size:12px;">1 / 12</span>
+              </div>
+              <p style="font-size:13px;color:#596679;margin-bottom:12px;">报告缺少可用的试验开始与结束日期，无法核对原始记录日期是否在区间内。</p>
+
+              <!-- 跨文档对比 -->
+              <div style="padding:8px 12px;margin-bottom:10px;background:#fff9ef;border-radius:6px;font-size:11px;color:#9a5c05;">⚠ 跨文档对比：检测报告的试验日期缺失，无法与原始记录中的执行日期进行时间线校验。</div>
+
+              <!-- 原文证据卡片（4 文档 tab） -->
+              <div style="display:flex;gap:4px;margin-bottom:10px;">
+                <span style="padding:5px 9px;border-radius:6px;font-size:11px;font-weight:650;background:#176b5b;color:#fff;">检测报告</span>
+                <span style="padding:5px 9px;border-radius:6px;font-size:11px;font-weight:650;background:#edf0f4;color:#586579;">委托单</span>
+                <span style="padding:5px 9px;border-radius:6px;font-size:11px;font-weight:650;background:#edf0f4;color:#586579;">试验计划</span>
+                <span style="padding:5px 9px;border-radius:6px;font-size:11px;font-weight:650;background:#edf0f4;color:#586579;">原始记录</span>
+              </div>
+              <div class="block">
+                <h5>📄 E202603209520-1.docx · 第1页</h5>
+                <p style="color:#344657;font-size:12px;">原文摘录：「检测日期：____年__月__日 至 ____年__月__日」</p>
+              </div>
+              <div style="font-size:11px;color:#176b5b;font-weight:600;cursor:pointer;">+ 查看页面截图</div>
+
+              <!-- 这意味着什么 -->
+              <div style="margin-top:12px;padding:10px 12px;background:#f4f7fa;border-radius:6px;">
+                <strong style="font-size:10px;color:#344657;">这意味着什么</strong>
+                <p style="font-size:11px;color:#596679;margin-top:4px;">日期是判断试验是否在规定周期内完成的基础信息。缺少日期将导致后续时间线检查无法执行。</p>
+              </div>
+
+              <!-- 操作按钮 -->
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                <button style="border:0;border-radius:8px;background:#176b5b;color:#fff;padding:8px 16px;font-weight:700;cursor:pointer;font-size:12px;">处理这个问题</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+
+  </div>
+  </div>
+</main>
+</div>
+</body>
+</html>

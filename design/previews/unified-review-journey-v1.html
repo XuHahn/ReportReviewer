@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>一体化审核工作台 · UI/UX 原型</title>
+  <style>
+    :root {
+      --ink:#172833;
+      --ink-2:#3d5260;
+      --muted:#74838c;
+      --canvas:#edf2f3;
+      --paper:#fbfcfc;
+      --line:#d6e0e2;
+      --line-strong:#bdcbcf;
+      --green:#0d6b59;
+      --green-deep:#074f43;
+      --green-soft:#e8f4f0;
+      --blue:#315f7b;
+      --blue-soft:#eaf1f5;
+      --amber:#a96c12;
+      --amber-soft:#fff4dc;
+      --red:#bd443b;
+      --red-soft:#fff0ee;
+      --shadow:0 18px 55px rgba(27,52,62,.10);
+      --body:"Avenir Next","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+      --display:"Songti SC","STSong",serif;
+      --utility:"DIN Alternate","Avenir Next",sans-serif;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; overflow-x:hidden; background:var(--canvas); color:var(--ink); font-family:var(--body); }
+    button,input { font:inherit; }
+    button { cursor:pointer; }
+    button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid rgba(49,95,123,.28); outline-offset:2px; }
+
+    .app { min-height:100vh; }
+    .global-bar {
+      position:sticky; top:0; z-index:30; height:68px; display:grid;
+      grid-template-columns:268px minmax(0,1fr) auto; align-items:center;
+      border-bottom:1px solid #cbd7da; background:rgba(251,252,252,.96);
+      backdrop-filter:blur(14px);
+    }
+    .brand { height:100%; display:flex; align-items:center; gap:12px; padding:0 20px; border-right:1px solid var(--line); }
+    .brand-mark { position:relative; width:32px; height:32px; border:2px solid var(--green); border-radius:50%; }
+    .brand-mark::before,.brand-mark::after { content:""; position:absolute; background:var(--green); }
+    .brand-mark::before { width:2px; height:20px; left:13px; top:4px; transform:rotate(45deg); }
+    .brand-mark::after { width:8px; height:8px; right:-3px; top:-3px; border:3px solid var(--paper); border-radius:50%; }
+    .brand b { display:block; letter-spacing:.04em; font-size:14px; }
+    .brand small { display:block; margin-top:2px; color:var(--muted); font:10px/1 var(--utility); letter-spacing:.12em; }
+    .crumb { min-width:0; padding:0 24px; }
+    .crumb small { color:var(--muted); font-size:10px; }
+    .crumb b { display:block; margin-top:3px; overflow:hidden; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+    .global-actions { display:flex; align-items:center; gap:8px; padding:0 20px; }
+    .ghost,.primary,.subtle {
+      min-height:36px; padding:0 13px; border:1px solid var(--line-strong); border-radius:7px;
+      background:#fff; color:var(--ink-2); font-size:11px; font-weight:700;
+    }
+    .primary { border-color:var(--green); background:var(--green); color:#fff; }
+    .primary:hover { background:var(--green-deep); }
+    .subtle { border-color:transparent; background:transparent; color:var(--blue); }
+
+    .layout { display:grid; grid-template-columns:268px minmax(0,1fr); min-height:calc(100vh - 68px); }
+    .task-rail { position:sticky; top:68px; height:calc(100vh - 68px); overflow:auto; border-right:1px solid #cbd7da; background:#f4f7f7; }
+    .task-rail-head { padding:18px 16px 13px; }
+    .task-rail-head button { width:100%; min-height:41px; border:0; border-radius:8px; background:var(--ink); color:#fff; font-size:12px; font-weight:750; }
+    .task-search { display:flex; align-items:center; gap:8px; margin:12px 0 0; padding:9px 10px; border:1px solid var(--line); border-radius:7px; background:#fff; }
+    .task-search span { color:#91a0a7; }
+    .task-search input { min-width:0; width:100%; padding:0; border:0; outline:0; color:var(--ink); font-size:11px; }
+    .rail-label { display:flex; justify-content:space-between; margin:8px 18px 7px; color:#87949b; font:10px/1 var(--utility); letter-spacing:.08em; text-transform:uppercase; }
+    .task-list { padding:0 9px 18px; }
+    .task-item { position:relative; width:100%; margin:3px 0; padding:12px 11px 12px 14px; border:1px solid transparent; border-radius:8px; background:transparent; color:inherit; text-align:left; }
+    .task-item::before { content:""; position:absolute; inset:11px auto 11px 4px; width:3px; border-radius:2px; background:transparent; }
+    .task-item:hover { background:#fff; }
+    .task-item.active { border-color:#c8d6d8; background:#fff; box-shadow:0 5px 18px rgba(26,52,61,.06); }
+    .task-item.active::before { background:var(--green); }
+    .task-item b { display:block; font:700 11px/1.3 var(--utility); letter-spacing:.02em; }
+    .task-item p { margin:5px 0 7px; overflow:hidden; color:var(--muted); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+    .task-meta { display:flex; align-items:center; justify-content:space-between; color:#8b999f; font-size:9px; }
+    .task-state { padding:3px 6px; border-radius:99px; background:var(--green-soft); color:var(--green); font-weight:750; }
+    .task-state.warn { background:var(--amber-soft); color:var(--amber); }
+    .task-state.neutral { background:#e8edef; color:#64737b; }
+
+    .main { min-width:0; }
+    .case-head { padding:29px 34px 22px; border-bottom:1px solid var(--line); background:var(--paper); }
+    .case-head-top { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; }
+    .eyebrow { color:var(--green); font:750 10px/1 var(--utility); letter-spacing:.14em; }
+    .case-head h1 { max-width:760px; margin:8px 0 0; font:700 27px/1.25 var(--display); letter-spacing:.02em; }
+    .case-head p { margin:8px 0 0; color:var(--muted); font-size:12px; }
+    .case-state { flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:8px 11px; border:1px solid #bcd7cf; border-radius:99px; background:var(--green-soft); color:var(--green); font-size:11px; font-weight:750; }
+    .case-state i { width:7px; height:7px; border-radius:50%; background:var(--green); }
+
+    .evidence-route { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); align-items:center; margin-top:25px; }
+    .route-node { position:relative; z-index:1; min-width:0; }
+    .route-node::after { content:""; position:absolute; top:15px; left:calc(50% + 18px); width:calc(100% - 36px); height:1px; background:#b9c9cc; }
+    .route-node:last-child::after { display:none; }
+    .route-dot { width:31px; height:31px; display:grid; place-items:center; margin:auto; border:1px solid #adc1c4; border-radius:50%; background:#fff; color:#70838b; font:750 10px/1 var(--utility); }
+    .route-node.done .route-dot { border-color:var(--green); background:var(--green); color:#fff; }
+    .route-node.alert .route-dot { border-color:var(--red); background:var(--red-soft); color:var(--red); }
+    .route-node strong,.route-node small { display:block; overflow:hidden; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
+    .route-node strong { margin-top:7px; font-size:10px; }
+    .route-node small { margin-top:2px; color:var(--muted); font-size:8px; }
+
+    .journey { position:relative; max-width:1450px; margin:auto; padding:30px 34px 80px 108px; }
+    .journey::before { content:""; position:absolute; top:30px; bottom:80px; left:61px; width:1px; background:#b9c9cc; }
+    .stage { position:relative; margin-bottom:24px; scroll-margin-top:94px; }
+    .stage:last-child { margin-bottom:0; }
+    .stage-marker { position:absolute; left:-80px; top:0; width:54px; text-align:center; }
+    .stage-marker span { position:relative; z-index:2; width:35px; height:35px; display:grid; place-items:center; margin:auto; border:1px solid #aebfc3; border-radius:50%; background:var(--canvas); color:var(--ink-2); font:750 11px/1 var(--utility); }
+    .stage.active .stage-marker span { border-color:var(--green); background:var(--green); color:#fff; box-shadow:0 0 0 6px var(--canvas); }
+    .stage-marker b { display:block; margin-top:7px; color:#64767e; font-size:9px; }
+    .stage-panel { overflow:hidden; border:1px solid #cdd9dc; border-radius:12px; background:var(--paper); box-shadow:0 8px 28px rgba(31,57,66,.05); }
+    .stage-head { display:flex; align-items:center; justify-content:space-between; gap:22px; padding:18px 21px; border-bottom:1px solid var(--line); }
+    .stage-head h2 { margin:0; font-size:17px; }
+    .stage-head p { margin:5px 0 0; color:var(--muted); font-size:11px; }
+    .stage-status { display:flex; align-items:center; gap:8px; color:var(--green); font-size:11px; font-weight:750; }
+    .stage-status::before { content:"✓"; width:23px; height:23px; display:grid; place-items:center; border-radius:50%; background:var(--green-soft); }
+    .stage-status.pending { color:#687980; }
+    .stage-status.pending::before { content:"…"; background:#e8edef; color:#687980; }
+
+    .intake-summary { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:20px; align-items:center; padding:14px 21px; background:#f1f6f5; }
+    .intake-summary b { font-size:12px; }
+    .intake-summary p { margin:4px 0 0; color:var(--muted); font-size:10px; }
+    .readiness { display:flex; gap:6px; }
+    .readiness span { min-width:31px; height:24px; display:grid; place-items:center; border-radius:5px; background:var(--green); color:#fff; font:750 9px/1 var(--utility); }
+    .file-table { width:100%; border-collapse:collapse; }
+    .file-table th { padding:9px 14px; border-bottom:1px solid var(--line); background:#f7f9f9; color:#7b8a91; font-size:9px; font-weight:650; text-align:left; }
+    .file-table td { padding:12px 14px; border-bottom:1px solid #e5ebed; vertical-align:middle; }
+    .file-table tr:last-child td { border-bottom:0; }
+    .doc-kind { display:flex; align-items:center; gap:10px; }
+    .doc-icon { width:30px; height:35px; display:grid; place-items:center; border:1px solid #c7d4d7; border-radius:5px 9px 5px 5px; background:#fff; color:var(--blue); font:750 8px/1 var(--utility); }
+    .doc-kind b { display:block; font-size:11px; }
+    .doc-kind small { display:block; margin-top:3px; color:var(--muted); font-size:9px; }
+    .file-name { max-width:470px; overflow:hidden; color:var(--ink-2); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+    .file-name small { display:block; margin-top:4px; color:#84939a; font-size:9px; }
+    .ready-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 7px; border-radius:99px; background:var(--green-soft); color:var(--green); font-size:9px; font-weight:750; }
+    .ready-chip::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+    .ready-chip.pending { background:#edf1f2; color:#697a82; }
+    .row-actions { white-space:nowrap; }
+    .row-actions button { padding:5px 7px; border:0; background:transparent; color:var(--blue); font-size:9px; font-weight:700; }
+    .standard-row { display:flex; align-items:center; justify-content:space-between; gap:18px; margin:0 21px 18px; padding:12px 14px; border:1px dashed #b9c9cc; border-radius:8px; background:#f9fbfb; }
+    .standard-row b { display:block; font-size:11px; }
+    .standard-row span { display:block; margin-top:4px; color:var(--muted); font-size:9px; }
+    .standard-row button { padding:7px 9px; border:1px solid #bfd1d4; border-radius:6px; background:#fff; color:var(--blue); font-size:9px; font-weight:700; }
+
+    .audit-body { display:grid; grid-template-columns:minmax(0,1fr) 270px; }
+    .audit-main { min-width:0; padding:18px 21px 21px; }
+    .audit-banner { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:13px 14px; border:1px solid #c8ddd7; border-radius:8px; background:var(--green-soft); }
+    .audit-banner b { display:block; font-size:12px; }
+    .audit-banner span { display:block; margin-top:3px; color:#61766f; font-size:9px; }
+    .audit-banner strong { color:var(--green); font:750 22px/1 var(--utility); }
+    .rule-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-top:12px; }
+    .rule { min-height:67px; padding:10px; border:1px solid #dce5e7; border-radius:7px; background:#fff; }
+    .rule span { color:#829198; font-size:8px; }
+    .rule b { display:block; margin-top:6px; font-size:10px; line-height:1.35; }
+    .rule small { display:block; margin-top:4px; color:var(--green); font-size:8px; }
+    .rule.issue { border-left:3px solid var(--red); }
+    .rule.issue small { color:var(--red); }
+    .audit-side { padding:18px; border-left:1px solid var(--line); background:#f6f8f8; }
+    .audit-side h3 { margin:0; font-size:12px; }
+    .run-line { position:relative; margin-top:14px; padding-left:19px; }
+    .run-line::before { content:""; position:absolute; left:4px; top:7px; bottom:7px; width:1px; background:#c4d2d5; }
+    .run-step { position:relative; margin-bottom:13px; }
+    .run-step::before { content:""; position:absolute; left:-18px; top:3px; width:7px; height:7px; border:2px solid #f6f8f8; border-radius:50%; background:var(--green); box-shadow:0 0 0 1px var(--green); }
+    .run-step b { display:block; font-size:9px; }
+    .run-step span { display:block; margin-top:2px; color:var(--muted); font-size:8px; }
+    .audit-side button { width:100%; margin-top:8px; }
+
+    .result-summary { display:grid; grid-template-columns:1.3fr repeat(3,.7fr); border-bottom:1px solid var(--line); }
+    .result-summary > div { min-height:82px; display:flex; flex-direction:column; justify-content:center; padding:14px 17px; border-right:1px solid var(--line); }
+    .result-summary > div:last-child { border-right:0; }
+    .result-summary small { color:var(--muted); font-size:9px; }
+    .result-summary b { margin-top:5px; font:750 22px/1 var(--utility); }
+    .result-summary .summary-lead b { font:700 14px/1.4 var(--body); }
+    .result-summary .summary-lead span { margin-top:5px; color:var(--muted); font-size:9px; }
+    .result-summary .bad b { color:var(--red); }
+    .result-summary .warn b { color:var(--amber); }
+    .result-summary .good b { color:var(--green); }
+
+    .results-workspace { display:grid; grid-template-columns:330px minmax(0,1fr); min-height:560px; }
+    .issue-queue { border-right:1px solid var(--line); background:#f7f9f9; }
+    .queue-tools { position:sticky; top:68px; z-index:4; padding:12px; border-bottom:1px solid var(--line); background:#f7f9f9; }
+    .filter-row { display:flex; gap:5px; }
+    .filter-row button { flex:1; padding:7px 5px; border:1px solid transparent; border-radius:6px; background:#e9eeef; color:#687980; font-size:9px; font-weight:700; }
+    .filter-row button.active { border-color:var(--ink); background:var(--ink); color:#fff; }
+    .issue-list { padding:10px; }
+    .issue-group { display:flex; justify-content:space-between; margin:13px 5px 6px; color:#75858c; font-size:9px; font-weight:750; }
+    .issue-card { position:relative; width:100%; margin-bottom:6px; padding:11px 10px 10px 14px; border:1px solid #dce4e6; border-radius:7px; background:#fff; color:inherit; text-align:left; }
+    .issue-card::before { content:""; position:absolute; left:0; top:9px; bottom:9px; width:3px; border-radius:0 3px 3px 0; background:var(--red); }
+    .issue-card.selected { border-color:#dcaaa5; background:var(--red-soft); }
+    .issue-card span { display:flex; justify-content:space-between; color:#839198; font-size:8px; }
+    .issue-card h4 { margin:6px 0 4px; font-size:10px; line-height:1.4; }
+    .issue-card p { margin:0; overflow:hidden; color:#6d7e85; font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+
+    .issue-detail { min-width:0; padding:22px; }
+    .detail-title { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; align-items:start; }
+    .detail-alert { width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:var(--red-soft); color:var(--red); font:750 18px/1 var(--utility); }
+    .detail-title em { display:inline-flex; padding:3px 7px; border-radius:99px; background:var(--red-soft); color:var(--red); font-size:9px; font-style:normal; font-weight:750; }
+    .detail-title h3 { margin:7px 0 0; font-size:17px; line-height:1.45; }
+    .detail-title p { margin:6px 0 0; color:var(--muted); font-size:10px; line-height:1.6; }
+    .detail-index { color:#8b989e; font:10px/1 var(--utility); }
+    .compare-label { display:flex; justify-content:space-between; margin:20px 0 9px; }
+    .compare-label b { font-size:12px; }
+    .compare-label span { color:var(--muted); font-size:9px; }
+    .compare-grid { display:grid; grid-template-columns:minmax(0,1fr) 30px minmax(0,1fr); align-items:stretch; }
+    .evidence-card { overflow:hidden; border:1px solid #cfe0dc; border-top:3px solid var(--green); border-radius:8px; background:#f1f8f6; }
+    .evidence-card[role="button"] { cursor:zoom-in; transition:box-shadow .16s ease,transform .16s ease; }
+    .evidence-card[role="button"]:hover { box-shadow:0 8px 24px rgba(24,54,62,.10); transform:translateY(-1px); }
+    .evidence-card.conflict { border-color:#ead1ce; border-top-color:var(--red); background:#fff5f4; }
+    .evidence-head { padding:11px 12px; border-bottom:1px solid rgba(54,80,87,.12); }
+    .evidence-head span { color:var(--muted); font-size:8px; }
+    .evidence-head b { display:block; margin-top:4px; overflow:hidden; font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+    .evidence-body { padding:11px 12px 13px; }
+    .evidence-result { display:inline-flex; padding:4px 7px; border-radius:5px; background:#fff; color:var(--green); font-size:9px; font-weight:750; }
+    .evidence-result.bad { margin-left:4px; color:var(--red); }
+    .evidence-body table { width:100%; margin-top:9px; border-collapse:collapse; background:rgba(255,255,255,.8); font-size:8px; }
+    .evidence-body th,.evidence-body td { padding:6px; border:1px solid rgba(78,101,108,.15); text-align:left; }
+    .evidence-body th { color:#73828a; font-weight:650; }
+    .vs { display:grid; place-items:center; color:#8a989e; font:750 8px/1 var(--utility); }
+    .meaning { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:13px; }
+    .meaning > div { padding:12px 13px; border:1px solid var(--line); border-radius:8px; background:#f6f8f8; }
+    .meaning > div:last-child { border-color:#ead6af; background:var(--amber-soft); }
+    .meaning b { font-size:10px; }
+    .meaning p { margin:6px 0 0; color:#5f7078; font-size:9px; line-height:1.6; }
+    .decision-bar { display:flex; align-items:center; gap:7px; margin-top:14px; padding-top:13px; border-top:1px solid var(--line); }
+    .decision-bar span { margin-right:auto; color:var(--muted); font-size:9px; }
+    .decision-bar button { min-height:32px; padding:0 10px; border:1px solid #c6d2d5; border-radius:6px; background:#fff; color:var(--ink-2); font-size:9px; font-weight:700; }
+    .decision-bar .confirm { border-color:var(--green); background:var(--green); color:#fff; }
+
+    .stage.locked .stage-panel { position:relative; min-height:190px; }
+    .stage.locked .stage-panel > * { opacity:.22; pointer-events:none; user-select:none; }
+    .stage.locked .stage-panel::after { content:attr(data-locked-message); position:absolute; left:50%; top:50%; width:min(410px,80%); padding:15px 17px; border:1px solid #bdcbcf; border-radius:9px; background:rgba(255,255,255,.96); color:var(--ink-2); box-shadow:0 10px 30px rgba(27,52,62,.09); font-size:11px; font-weight:700; line-height:1.6; text-align:center; transform:translate(-50%,-50%); }
+
+    .toast { position:fixed; right:24px; bottom:24px; z-index:60; display:none; max-width:360px; padding:12px 14px; border-radius:8px; background:var(--ink); color:#fff; box-shadow:var(--shadow); font-size:11px; }
+    .toast.show { display:block; animation:toast-in .2s ease-out; }
+    @keyframes toast-in { from { opacity:0; transform:translateY(8px); } }
+
+    .dialog-backdrop { position:fixed; inset:0; z-index:80; display:none; place-items:center; padding:20px; background:rgba(18,36,45,.45); backdrop-filter:blur(4px); }
+    .dialog-backdrop.open,.dialog-backdrop:target { display:grid; }
+    .dialog { width:min(520px,100%); overflow:hidden; border:1px solid #b8c9cd; border-radius:12px; background:var(--paper); box-shadow:0 28px 80px rgba(12,31,39,.24); }
+    .dialog header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:20px 21px 16px; border-bottom:1px solid var(--line); }
+    .dialog header small { color:var(--green); font:750 9px/1 var(--utility); letter-spacing:.12em; }
+    .dialog h2 { margin:7px 0 0; font-size:17px; }
+    .dialog header button { width:30px; height:30px; border:0; border-radius:6px; background:#edf2f3; color:#66777f; }
+    .dialog-body { padding:18px 21px; }
+    .dialog-warning { padding:12px 13px; border:1px solid #ead6af; border-radius:8px; background:var(--amber-soft); color:#665635; font-size:10px; line-height:1.65; }
+    .dialog-warning b { display:block; margin-bottom:3px; color:#55431e; font-size:11px; }
+    .dialog-list { margin:13px 0 0; padding:0; list-style:none; }
+    .dialog-list li { position:relative; margin:8px 0; padding-left:17px; color:#596b73; font-size:10px; line-height:1.5; }
+    .dialog-list li::before { content:""; position:absolute; left:2px; top:6px; width:6px; height:6px; border-radius:50%; background:var(--green); }
+    .field { display:block; margin-bottom:13px; }
+    .field span { display:block; margin-bottom:6px; color:#586a72; font-size:10px; font-weight:700; }
+    .field input,.field select { width:100%; height:40px; padding:0 11px; border:1px solid #c5d2d5; border-radius:7px; background:#fff; color:var(--ink); font:11px var(--body); }
+    .dialog footer { display:flex; justify-content:flex-end; gap:8px; padding:13px 21px; border-top:1px solid var(--line); background:#f5f8f8; }
+    .source-dialog { width:min(900px,100%); }
+    .source-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:10px 16px; border-bottom:1px solid var(--line); background:#f5f8f8; color:var(--muted); font-size:10px; }
+    .source-toolbar div { display:flex; gap:6px; }
+    .source-toolbar button { min-width:32px; height:30px; border:1px solid #c4d2d5; border-radius:6px; background:#fff; color:var(--ink-2); }
+    .source-canvas { max-height:66vh; overflow:auto; padding:24px; background:#dfe6e8; }
+    .source-sheet { position:relative; width:min(640px,100%); min-height:560px; margin:auto; padding:42px 46px; background:#fff; box-shadow:0 8px 28px rgba(18,38,46,.16); }
+    .source-sheet small { color:#89969c; font:9px var(--utility); }
+    .source-sheet h3 { margin:14px 0 24px; font:700 18px var(--display); }
+    .source-sheet table { width:100%; border-collapse:collapse; font-size:10px; }
+    .source-sheet th,.source-sheet td { padding:11px; border:1px solid #9ba8ad; text-align:left; }
+    .source-highlight { margin-top:24px; padding:12px; border:2px solid #d69a20; background:rgba(255,225,132,.24); color:#675423; font-size:11px; line-height:1.6; }
+
+    @media (max-width:1120px) {
+      .global-bar { grid-template-columns:220px minmax(0,1fr) auto; }.layout { grid-template-columns:220px minmax(0,1fr); }
+      .audit-body { grid-template-columns:1fr; }.audit-side { border-top:1px solid var(--line); border-left:0; }
+      .rule-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.results-workspace { grid-template-columns:280px minmax(0,1fr); }
+    }
+    @media (max-width:820px) {
+      .global-bar { height:auto; min-height:62px; display:flex; }.brand { min-width:0; flex:1 1 auto; padding:0 12px; border-right:0; }.brand small { overflow:hidden; font-size:8px; text-overflow:ellipsis; white-space:nowrap; }.crumb { display:none; }.global-actions .ghost { display:none; }
+      .global-actions { width:112px; flex:0 0 112px; padding:0 8px 0 0; }.global-actions .primary { width:104px; padding:0 7px; overflow:hidden; font-size:0; white-space:nowrap; }.global-actions .primary::after { content:"继续处理"; font-size:10px; }
+      body.new-task-mode .global-actions .primary::after { content:"上传资料"; }
+      .layout { display:block; }.task-rail { position:static; width:100%; height:auto; border-right:0; border-bottom:1px solid var(--line); }.task-list { display:flex; overflow:auto; }.task-item { min-width:220px; }.rail-label,.task-search { display:none; }
+      .case-head { min-width:0; padding:23px 16px 18px; }.case-head-top { display:block; min-width:0; }.case-head h1 { overflow-wrap:anywhere; font-size:23px; }.case-state { width:max-content; max-width:100%; margin-top:13px; }.evidence-route { max-width:100%; grid-template-columns:repeat(7,88px); overflow:auto; padding-bottom:7px; }
+      .journey { padding:22px 14px 50px 58px; }.journey::before { left:31px; }.stage-marker { left:-52px; width:38px; }.stage-marker b { display:none; }
+      .stage { min-width:0; }.stage-panel { min-width:0; }.stage-head { align-items:flex-start; flex-direction:column; gap:9px; }.stage-head > * { max-width:100%; }.intake-summary { grid-template-columns:1fr; }.readiness { justify-content:flex-start; }
+      .file-table thead,.file-table td:nth-child(3) { display:none; }.file-table,.file-table tbody,.file-table tr,.file-table td { display:block; width:100%; }.file-table tr { position:relative; padding:10px 98px 10px 0; border-bottom:1px solid var(--line); }.file-table td { padding:4px 14px; border:0; }.file-table td:last-child { position:absolute; top:11px; right:7px; width:92px; }
+      .file-name { max-width:100%; overflow:visible; overflow-wrap:anywhere; white-space:normal; }.standard-row { align-items:flex-start; flex-direction:column; }.standard-row button { align-self:flex-end; }
+      .result-summary { grid-template-columns:1fr 1fr; }.result-summary .summary-lead { grid-column:1/-1; }.results-workspace { grid-template-columns:1fr; }.issue-queue { border-right:0; border-bottom:1px solid var(--line); }.issue-list { display:flex; gap:7px; overflow:auto; }.issue-group { display:none; }.issue-card { min-width:240px; }.compare-grid { grid-template-columns:1fr; gap:7px; }.vs { padding:2px; }.meaning { grid-template-columns:1fr; }.decision-bar { align-items:stretch; flex-direction:column; }.decision-bar span { margin:0; }
+      .audit-main,.audit-side,.issue-detail { min-width:0; }.rule-grid { grid-template-columns:1fr; }.dialog-backdrop { padding:12px; }.dialog footer { align-items:stretch; flex-direction:column-reverse; }.dialog footer button { width:100%; }.source-canvas { padding:12px; }.source-sheet { min-height:480px; padding:28px 22px; }
+    }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; }.toast.show { animation:none; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="global-bar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><b>EMC 审核台</b><small>EVIDENCE WORKBENCH</small></div></div>
+      <div class="crumb"><small>审核任务 / EMC-20260729-or78tf</small><b>RD20 电机电磁兼容检测 · 首次审核</b></div>
+      <div class="global-actions"><button class="ghost" data-toast="已打开本任务的版本与操作记录">版本记录</button><button class="ghost" data-toast="导出菜单：PDF 报告、Excel 明细、证据包 ZIP">导出</button><button class="primary" data-scroll="results">继续处理 25 个问题</button></div>
+    </header>
+
+    <div class="layout">
+      <aside class="task-rail" aria-label="审核任务列表">
+        <div class="task-rail-head"><button data-open-dialog="new-task-dialog">＋ 新建审核任务</button><label class="task-search"><span>⌕</span><input aria-label="搜索审核任务" placeholder="搜索编号、产品或项目组" /></label></div>
+        <div class="rail-label"><span>最近任务</span><span>12</span></div>
+        <div class="task-list">
+          <button class="task-item active"><b>EMC-20260729-or78tf</b><p>RD20 电机 · E202508277046</p><div class="task-meta"><span>今天 11:26</span><span class="task-state">待处理 25</span></div></button>
+          <button class="task-item"><b>EMC-20260803-5qs8nt</b><p>前车标灯 · P59A / P57A2</p><div class="task-meta"><span>8 月 3 日</span><span class="task-state">审核完成</span></div></button>
+          <button class="task-item"><b>EMC-20260728-prr2fg</b><p>控制器 · 电气负荷试验</p><div class="task-meta"><span>7 月 28 日</span><span class="task-state warn">需确认 4</span></div></button>
+          <button class="task-item"><b>EMC-20260722-x3j1qa</b><p>雨刮电机 · 型式试验</p><div class="task-meta"><span>7 月 22 日</span><span class="task-state neutral">待补资料</span></div></button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section class="case-head">
+          <div class="case-head-top">
+            <div><span class="eyebrow">CURRENT REVIEW CASE</span><h1>一份任务，从资料上传到结论闭环</h1><p>资料、提取状态、机器审核和人工处理始终在同一页；无需在上传页与工作台之间切换。</p></div>
+            <div class="case-state"><i></i>机器审核完成 · 等待人工处理</div>
+          </div>
+          <div class="evidence-route" aria-label="证据链进度">
+            <div class="route-node done"><div class="route-dot">✓</div><strong>委托单</strong><small>已核查</small></div>
+            <div class="route-node done"><div class="route-dot">✓</div><strong>试验计划</strong><small>已核查</small></div>
+            <div class="route-node done"><div class="route-dot">✓</div><strong>原始记录</strong><small>54 份</small></div>
+            <div class="route-node done"><div class="route-dot">✓</div><strong>检测报告</strong><small>84 页</small></div>
+            <div class="route-node done"><div class="route-dot">31</div><strong>执行规则</strong><small>31 项</small></div>
+            <div class="route-node alert"><div class="route-dot">25</div><strong>发现问题</strong><small>待处理</small></div>
+            <div class="route-node"><div class="route-dot">0</div><strong>人工结论</strong><small>0 / 25</small></div>
+          </div>
+        </section>
+
+        <div class="journey">
+          <section class="stage" id="materials">
+            <div class="stage-marker"><span>01</span><b>资料</b></div>
+            <div class="stage-panel">
+              <header class="stage-head"><div><h2>项目资料</h2><p>在原位上传、替换和核查提取内容；资料变化后，本页后续结果自动标记为需重新审核。</p></div><div class="stage-status">4 份必传资料已就绪</div></header>
+              <div class="intake-summary"><div><b>资料已锁定，当前结果基于以下版本</b><p>任何文件被替换后，旧审核结果仍保留在版本记录中，但不能继续作为当前结论。</p></div><div class="readiness" aria-label="四份必传资料均已完成"><span>委</span><span>计</span><span>原</span><span>报</span></div></div>
+              <table class="file-table">
+                <thead><tr><th>资料角色</th><th>当前文件</th><th>提取与核查</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr><td><div class="doc-kind"><span class="doc-icon">XLS</span><div><b>委托单</b><small>必传 · 委托范围</small></div></div></td><td><div class="file-name">EMC测试申请表E202508277046（委托单）.xls<small>版本 1 · 118 KB</small></div></td><td><span class="ready-chip">字段已核查</span></td><td class="row-actions"><button data-toast="打开委托单提取核查">核查</button><button data-replace="委托单">替换</button></td></tr>
+                  <tr><td><div class="doc-kind"><span class="doc-icon">XLSX</span><div><b>试验计划</b><small>必传 · 定义范围</small></div></div></td><td><div class="file-name">ITW-平台执行器用280电机试验大纲251014Rev1.xlsx<small>版本 1 · 27 个计划项目</small></div></td><td><span class="ready-chip">范围已确认</span></td><td class="row-actions"><button data-toast="打开试验计划提取核查">核查</button><button data-replace="试验计划">替换</button></td></tr>
+                  <tr><td><div class="doc-kind"><span class="doc-icon">ZIP</span><div><b>原始记录</b><small>必传 · 执行证据</small></div></div></td><td><div class="file-name">test_set_04-rd20-original-records.zip<small>版本 1 · 已清点 54 份记录</small></div></td><td><span class="ready-chip">54 / 54 已转录</span></td><td class="row-actions"><button data-toast="打开原始记录文件清单">看清单</button><button data-replace="原始记录">替换</button></td></tr>
+                  <tr><td><div class="doc-kind"><span class="doc-icon">DOCX</span><div><b>检测报告</b><small>必传 · 发布结论</small></div></div></td><td><div class="file-name">报告书_E202508277046-1EN(RD20).docx<small>版本 1 · 84 页</small></div></td><td><span class="ready-chip">报告结构已核查</span></td><td class="row-actions"><button data-toast="打开检测报告提取核查">核查</button><button data-replace="检测报告">替换</button></td></tr>
+                </tbody>
+              </table>
+              <div class="standard-row"><div><b>参考标准 · ISO 16750-2:2012</b><span>已选择已发布版本 1 · 标准参数检查已纳入本次审核</span></div><button data-toast="打开标准选择器；仅可选择已人工发布的标准版本">更换标准</button></div>
+            </div>
+          </section>
+
+          <section class="stage" id="audit">
+            <div class="stage-marker"><span>02</span><b>审核</b></div>
+            <div class="stage-panel">
+              <header class="stage-head"><div><h2>审核执行</h2><p>机器检查的范围、完成程度和异常在这里解释清楚；无数据不会伪装成通过。</p></div><div class="stage-status">本次审核已完成</div></header>
+              <div class="audit-body">
+                <div class="audit-main">
+                  <div class="audit-banner"><div><b>所有输入均来自上方当前文件版本</b><span>报告与原始记录互为全集，试验计划定义要求范围，标准仅使用已发布要求。</span></div><strong>31 / 31</strong></div>
+                  <div class="rule-grid">
+                    <div class="rule issue"><span>发现问题</span><b>计划、记录与报告项目覆盖</b><small>检查 25 组 · 16 项需处理</small></div>
+                    <div class="rule issue"><span>发现问题</span><b>跨资料关键字段一致性</b><small>检查 6 组 · 3 项需处理</small></div>
+                    <div class="rule"><span>已检查</span><b>原始记录与报告结果</b><small>检查 18 组 · 未发现问题</small></div>
+                    <div class="rule issue"><span>发现问题</span><b>报告规范参数与结果参数</b><small>检查 14 组 · 1 项需处理</small></div>
+                    <div class="rule"><span>已检查</span><b>仪器校准有效期</b><small>检查 96 组 · 未发现问题</small></div>
+                    <div class="rule"><span>已检查</span><b>标准编号与引用</b><small>检查 211 组 · 未发现问题</small></div>
+                    <div class="rule"><span>已检查</span><b>汇总结论与明细结果</b><small>检查 9 组 · 未发现问题</small></div>
+                    <div class="rule issue"><span>发现问题</span><b>已发布标准与报告参数</b><small>检查 25 组 · 4 项需处理</small></div>
+                  </div>
+                </div>
+                <aside class="audit-side"><h3>本次运行记录</h3><div class="run-line"><div class="run-step"><b>资料版本锁定</b><span>11:02 · 4 份资料 + 1 份标准</span></div><div class="run-step"><b>证据图构建完成</b><span>11:04 · 814 条可追溯证据</span></div><div class="run-step"><b>31 项规则执行完成</b><span>11:06 · 未发生系统中断</span></div><div class="run-step"><b>等待人工处理</b><span>25 个问题尚未作出结论</span></div></div><button class="ghost" data-toast="确认后将基于当前资料版本重新运行全部审核规则">基于当前资料重新审核</button></aside>
+              </div>
+            </div>
+          </section>
+
+          <section class="stage active" id="results">
+            <div class="stage-marker"><span>03</span><b>结果</b></div>
+            <div class="stage-panel">
+              <header class="stage-head"><div><h2>审核结果与人工处理</h2><p>问题列表、证据原文和处理结论在同一视野中完成；处理后可统一退回修订。</p></div><button class="ghost" data-toast="当前还需处理 25 项，处理完后才能统一退回修订">统一退回修订</button></header>
+              <div class="result-summary"><div class="summary-lead"><small>当前状态</small><b>机器审核完成，等待审核员逐项确认</b><span>当前结果基于资料版本 1 · 2026-08-07 11:06</span></div><div class="bad"><small>需要处理</small><b>22</b></div><div class="warn"><small>需要确认</small><b>3</b></div><div class="good"><small>证据链完整</small><b>9</b></div></div>
+              <div class="results-workspace">
+                <aside class="issue-queue">
+                  <div class="queue-tools"><div class="filter-row"><button class="active" data-filter="attention">待处理 25</button><button data-filter="all">全部 34</button><button data-filter="done">已闭合 9</button></div></div>
+                  <div class="issue-list">
+                    <div class="issue-group"><span>资料缺失</span><span>16</span></div>
+                    <button class="issue-card" data-issue="coverage"><span><i>高温存储</i><i>待处理</i></span><h4>计划要求做，但没有找到完整测试结果</h4><p>原始记录和检测报告均未找到对应项目</p></button>
+                    <div class="issue-group"><span>内容不一致</span><span>6</span></div>
+                    <button class="issue-card selected" data-issue="conflict"><span><i>反向电压</i><i>待处理</i></span><h4>报告中同一次试验同时出现通过和不通过</h4><p>0016 · Mode 2 · 14V / 60s</p></button>
+                    <button class="issue-card" data-issue="parameter"><span><i>接地 / 供电偏移</i><i>待处理</i></span><h4>规范要求 ±1.5V，结果记录采用 ±1V</h4><p>检测报告第 60 页与第 62 页</p></button>
+                    <div class="issue-group"><span>需要人工确认</span><span>3</span></div>
+                    <button class="issue-card" data-issue="identity"><span><i>委托单位</i><i>待确认</i></span><h4>中英文企业名称是否指向同一主体？</h4><p>缺少共同企业标识，系统不直接判错</p></button>
+                  </div>
+                </aside>
+
+                <article class="issue-detail" aria-live="polite">
+                  <div class="detail-title"><div class="detail-alert">!</div><div><em id="detail-state">结果互相矛盾</em><h3 id="detail-heading">反向电压：同一样品和模式同时出现“通过”与“不通过”</h3><p id="detail-copy">样品 E202508277046-0016、Mode 2、14V / 60s 的两条报告记录结论相反；原始记录只给出“符合”。</p></div><span class="detail-index">17 / 25</span></div>
+                  <div class="compare-label"><b>系统实际比较了什么</b><span>点击原文卡片可展开整页证据</span></div>
+                  <div class="compare-grid" id="compare-grid">
+                    <div class="evidence-card"><div class="evidence-head"><span>原始记录 · 第 20 份 / 文件第 1 页</span><b>E202508277046_反向电压_0016_Mode 2_原始记录.pdf</b></div><div class="evidence-body"><span class="evidence-result">✓ 符合</span><table><tr><th>测试项目</th><th>条件</th><th>要求</th><th>实际</th><th>结果</th></tr><tr><td>反向电压</td><td>14V / 60s</td><td>C</td><td>C¹⁾</td><td>符合</td></tr></table></div></div>
+                    <div class="vs">对比</div>
+                    <div class="evidence-card conflict"><div class="evidence-head"><span>检测报告 · 文件第 57 页</span><b>报告书_E202508277046-1EN(RD20).docx</b></div><div class="evidence-body"><span class="evidence-result">✓ Pass</span><span class="evidence-result bad">! 不 Pass</span><table><tr><th>测试项目</th><th>条件</th><th>要求</th><th>实际</th><th>结果</th></tr><tr><td>Reversed voltage</td><td>14V / 60s</td><td>C</td><td>C¹⁾</td><td>Pass</td></tr><tr><td>Reversed voltage</td><td>14V / 60s</td><td>A</td><td>C¹⁾</td><td>不 Pass</td></tr></table></div></div>
+                  </div>
+                  <div class="meaning"><div><b>这意味着什么</b><p id="meaning-copy">报告内部的两条结果不能同时成立，而且其中一条与原始记录不一致。报告在修正前不能直接签发。</p></div><div><b>建议怎么处理</b><p id="suggestion-copy">先核对报告第 57 页第二条记录是否误插入，再按原始记录修正结果表和汇总结论。</p></div></div>
+                  <div class="decision-bar"><span>处理理由会进入审计记录，并与当前资料版本绑定。</span><button class="confirm" data-toast="已选择：要求修改检测报告；下一步填写处理依据">要求修改报告</button><button data-toast="已选择：原始记录需要修正">原始记录有误</button><button data-toast="已暂存当前问题，稍后处理">暂时搁置</button></div>
+                </article>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="dialog-backdrop" id="replace-dialog" role="presentation">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="replace-title">
+      <header><div><small>CREATE REVISION</small><h2 id="replace-title">替换当前资料</h2></div><button aria-label="关闭" data-close-dialog>×</button></header>
+      <div class="dialog-body"><div class="dialog-warning"><b>替换资料会创建一个新的修订版本</b>当前机器审核和人工处理记录不会删除，但会成为历史结果；新版本必须重新提取、核查并运行审核。</div><ul class="dialog-list"><li>保留当前文件、审核结果和处理记录供追溯</li><li>新文件提取完成前，不能启动下一次审核</li><li>只有新审核完成后，才能形成新的最终结论</li></ul></div>
+      <footer><button class="ghost" data-close-dialog>取消</button><button class="primary" id="confirm-replace">创建修订并选择文件</button></footer>
+    </section>
+  </div>
+
+  <div class="dialog-backdrop" id="new-task-dialog" role="presentation">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="new-task-title">
+      <header><div><small>NEW REVIEW CASE</small><h2 id="new-task-title">创建审核任务</h2></div><button aria-label="关闭" data-close-dialog>×</button></header>
+      <div class="dialog-body"><label class="field"><span>任务名称</span><input id="new-task-name" value="新产品 EMC 检测审核" /></label><label class="field"><span>所属项目组</span><select><option>电气性能实验室</option><option>环境可靠性实验室</option><option>未分组</option></select></label><div class="dialog-warning"><b>创建后仍停留在当前工作台</b>页面会切换为四份资料的空上传位；资料齐套后，审核执行和结果区域才会解锁。</div></div>
+      <footer><button class="ghost" data-close-dialog>取消</button><button class="primary" id="confirm-new-task">创建并上传资料</button></footer>
+    </section>
+  </div>
+
+  <div class="dialog-backdrop" id="evidence-dialog" role="presentation">
+    <section class="dialog source-dialog" role="dialog" aria-modal="true" aria-labelledby="evidence-dialog-title">
+      <header><div><small>FULL SOURCE PAGE</small><h2 id="evidence-dialog-title">查看完整原文</h2></div><button aria-label="关闭" data-close-dialog>×</button></header>
+      <div class="source-toolbar"><span id="evidence-dialog-meta">当前证据对应的文件与页码</span><div><button aria-label="缩小">−</button><button aria-label="当前缩放比例">100%</button><button aria-label="放大">+</button></div></div>
+      <div class="source-canvas"><div class="source-sheet"><small>ORIGINAL PAGE PREVIEW</small><h3 id="source-sheet-title">完整原文页</h3><table><tr><th>Test item</th><th>Condition</th><th>Requirement</th><th>Result</th></tr><tr><td>Reversed voltage</td><td>14V / 60s</td><td>C</td><td>Pass</td></tr></table><div class="source-highlight">实际实现时，这里直接加载审核快照中的真实整页图像，并将当前问题对应的原文位置框选。</div></div></div>
+      <footer><button class="ghost" data-close-dialog>返回结构化对比</button><button class="primary" data-toast="已请求在原文文件中打开当前页">打开原文文件</button></footer>
+    </section>
+  </div>
+
+  <input id="file-input" type="file" hidden />
+  <div class="toast" role="status" aria-live="polite"></div>
+  <script>
+    const toast = document.querySelector('.toast');
+    let toastTimer;
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+    }
+
+    document.querySelectorAll('[data-toast]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.toast)));
+    document.querySelectorAll('[data-scroll]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.scroll).scrollIntoView({ behavior:'smooth' })));
+
+    let replacing = '';
+    let newTaskMode = false;
+    const fileInput = document.getElementById('file-input');
+    const replaceDialog = document.getElementById('replace-dialog');
+    const newTaskDialog = document.getElementById('new-task-dialog');
+    function openDialog(dialog) { dialog.classList.add('open'); dialog.querySelector('button,input')?.focus(); }
+    function closeDialog(dialog) { dialog.classList.remove('open'); }
+    document.querySelectorAll('[data-open-dialog]').forEach(button => button.addEventListener('click', () => openDialog(document.getElementById(button.dataset.openDialog))));
+    document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => closeDialog(button.closest('.dialog-backdrop'))));
+    document.querySelectorAll('.dialog-backdrop').forEach(dialog => dialog.addEventListener('mousedown', event => { if (event.target === dialog) closeDialog(dialog); }));
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') document.querySelectorAll('.dialog-backdrop.open').forEach(closeDialog); });
+
+    document.querySelectorAll('[data-replace]').forEach(button => button.addEventListener('click', () => {
+      replacing = button.dataset.replace;
+      if (newTaskMode) fileInput.click();
+      else {
+        document.getElementById('replace-title').textContent = `替换${replacing}`;
+        openDialog(replaceDialog);
+      }
+    }));
+    document.getElementById('confirm-replace').addEventListener('click', () => { closeDialog(replaceDialog); fileInput.click(); });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) {
+        const action = document.querySelector(`[data-replace="${replacing}"]`);
+        const row = action?.closest('tr');
+        const fileName = row?.querySelector('.file-name');
+        const status = row?.querySelector('.ready-chip');
+        if (newTaskMode && fileName) fileName.innerHTML = `${fileInput.files[0].name}<small>新文件 · 等待上传和提取</small>`;
+        if (newTaskMode && status) { status.textContent = '等待提取'; status.classList.add('pending'); }
+        showToast(`${replacing}已选择新文件：${fileInput.files[0].name}。${newTaskMode ? '上传后会自动开始提取。' : '提交后将重新提取并使旧结果失效。'}`);
+      }
+      fileInput.value = '';
+    });
+
+    function enterNewTaskMode() {
+      const taskName = document.getElementById('new-task-name').value.trim() || '未命名审核任务';
+      newTaskMode = true;
+      document.body.classList.add('new-task-mode');
+      closeDialog(newTaskDialog);
+      document.querySelector('.crumb small').textContent = '审核任务 / 新建任务';
+      document.querySelector('.crumb b').textContent = `${taskName} · 资料准备`;
+      document.querySelector('.case-head h1').textContent = taskName;
+      document.querySelector('.case-head p').textContent = '先上传四份必传资料；每份资料提取完成后可立即原位核查，无需离开本页。';
+      document.querySelector('.case-state').innerHTML = '<i></i>等待上传 4 份必传资料';
+      const materialsStatus = document.querySelector('#materials .stage-status');
+      materialsStatus.textContent = '0 / 4 份必传资料';
+      materialsStatus.classList.add('pending');
+      document.querySelector('.intake-summary b').textContent = '把四份资料放入对应位置';
+      document.querySelector('.intake-summary p').textContent = '支持 PDF、DOCX、XLS / XLSX 和 ZIP；系统按资料角色选择对应提取方式。';
+      document.querySelectorAll('.readiness span').forEach(item => item.textContent = '—');
+      document.querySelectorAll('.file-table tbody tr').forEach(row => {
+        row.querySelector('.file-name').innerHTML = '尚未上传<small>请选择与资料角色相符的文件</small>';
+        const status = row.querySelector('.ready-chip');
+        status.textContent = '等待资料';
+        status.classList.add('pending');
+        const actions = row.querySelectorAll('.row-actions button');
+        actions[0].style.display = 'none';
+        actions[1].textContent = '上传';
+      });
+      document.querySelector('.standard-row b').textContent = '参考标准 · 尚未选择（可选）';
+      document.querySelector('.standard-row span').textContent = '未选择标准时仍可审核，但会明确提示未执行标准条款检查。';
+      document.querySelector('.standard-row button').textContent = '选择标准';
+
+      document.querySelectorAll('.route-node').forEach((node,index) => {
+        node.classList.remove('done','alert');
+        node.querySelector('.route-dot').textContent = index < 4 ? '—' : '0';
+        node.querySelector('small').textContent = index < 4 ? '等待资料' : '未开始';
+      });
+      document.getElementById('materials').classList.add('active');
+      document.getElementById('results').classList.remove('active');
+
+      const audit = document.getElementById('audit');
+      const results = document.getElementById('results');
+      audit.classList.add('locked');
+      audit.querySelector('.stage-status').textContent = '等待资料就绪';
+      audit.querySelector('.stage-status').classList.add('pending');
+      audit.querySelector('.stage-panel').dataset.lockedMessage = '上传并核查四份必传资料后，才可启动机器审核。';
+      results.classList.add('locked');
+      results.querySelector('.stage-panel').dataset.lockedMessage = '机器审核完成后，问题、证据和人工处理入口会在这里自动出现。';
+
+      const activeTask = document.querySelector('.task-item.active');
+      activeTask.querySelector('b').textContent = '新建任务';
+      activeTask.querySelector('p').textContent = taskName;
+      activeTask.querySelector('.task-state').className = 'task-state neutral';
+      activeTask.querySelector('.task-state').textContent = '待上传 4';
+      document.querySelector('.global-actions .primary').textContent = '前往上传资料';
+      document.querySelector('.global-actions .primary').dataset.scroll = 'materials';
+      document.getElementById('materials').scrollIntoView({behavior:'smooth'});
+      showToast('新任务已创建。页面没有跳转，请从“项目资料”开始上传。');
+    }
+    document.getElementById('confirm-new-task').addEventListener('click', enterNewTaskMode);
+    if (new URLSearchParams(location.search).get('scenario') === 'new') enterNewTaskMode();
+
+    const issueCopy = {
+      conflict:['结果互相矛盾','反向电压：同一样品和模式同时出现“通过”与“不通过”','样品 E202508277046-0016、Mode 2、14V / 60s 的两条报告记录结论相反；原始记录只给出“符合”。'],
+      coverage:['资料未闭合','高温存储：计划要求执行，但没有找到完整结果','试验计划明确列出高温存储，系统完成记录名称、表内项目和报告章节匹配后，仍未找到对应执行证据。'],
+      parameter:['参数前后不一致','接地 / 供电偏移：要求 ±1.5V，结果采用 ±1V','同一检测报告的规范要求和结果记录使用了不同偏移电压；两处原文分别位于第 60 页和第 62 页。'],
+      identity:['需要人工确认','委托单位的中英文名称是否指向同一主体？','委托单使用中文企业名称，检测报告使用英文名称；缺少统一社会信用代码等共同标识，系统不会仅凭字符串差异判错。']
+    };
+    const compareGrid = document.getElementById('compare-grid');
+    const initialEvidence = compareGrid.innerHTML;
+    const issueViews = {
+      conflict:{ evidence:initialEvidence, meaning:'报告内部的两条结果不能同时成立，而且其中一条与原始记录不一致。报告在修正前不能直接签发。', suggestion:'先核对报告第 57 页第二条记录是否误插入，再按原始记录修正结果表和汇总结论。' },
+      coverage:{
+        evidence:`<div class="evidence-card"><div class="evidence-head"><span>试验计划 · 文件第 3 页</span><b>ITW-平台执行器用280电机试验大纲251014Rev1.xlsx</b></div><div class="evidence-body"><span class="evidence-result">已找到要求</span><table><tr><th>计划项目</th><th>条件</th><th>持续时间</th></tr><tr><td>高温存储</td><td>85℃</td><td>48h</td></tr></table></div></div><div class="vs">检索</div><div class="evidence-card conflict"><div class="evidence-head"><span>原始记录 + 检测报告</span><b>已检索文件名、表内测试项和报告章节</b></div><div class="evidence-body"><span class="evidence-result bad">未形成完整证据链</span><table><tr><th>资料</th><th>匹配结果</th><th>判定</th></tr><tr><td>原始记录</td><td>0 份可确认记录</td><td>缺少</td></tr><tr><td>检测报告</td><td>0 条可确认结果</td><td>缺少</td></tr></table></div></div>`,
+        meaning:'试验计划要求执行高温存储，但当前资料中没有找到能同时证明“已执行”和“结果是什么”的证据链。',
+        suggestion:'确认是否漏传原始记录或报告章节；若试验未执行，需补测并同步更新报告。'
+      },
+      parameter:{
+        evidence:`<div class="evidence-card"><div class="evidence-head"><span>检测报告 · 文件第 60 页</span><b>规范要求 / Test specification requirements</b></div><div class="evidence-body"><span class="evidence-result">要求值 ±1.5V</span><table><tr><th>字段角色</th><th>原文值</th><th>来源</th></tr><tr><td>允许偏移范围</td><td>±1.5V</td><td>规范要求表</td></tr></table></div></div><div class="vs">对比</div><div class="evidence-card conflict"><div class="evidence-head"><span>检测报告 · 文件第 62 页</span><b>实际试验参数 / Result record</b></div><div class="evidence-body"><span class="evidence-result bad">实际值 ±1V</span><table><tr><th>字段角色</th><th>原文值</th><th>来源</th></tr><tr><td>供电偏移值</td><td>±1V</td><td>结果记录表</td></tr></table></div></div>`,
+        meaning:'报告自己声明的试验要求是 ±1.5V，但结果页记录的实际参数是 ±1V，无法证明试验按声明条件完成。',
+        suggestion:'返回原始记录确认实际设置值。若为报告录入错误则修正报告；若实际仅测试 ±1V，则需重新试验。'
+      },
+      identity:{
+        evidence:`<div class="evidence-card"><div class="evidence-head"><span>委托单 · 文件第 1 页</span><b>EMC测试申请表E202508277046（委托单）.xls</b></div><div class="evidence-body"><span class="evidence-result">中文名称</span><table><tr><th>字段</th><th>原文</th><th>共同标识</th></tr><tr><td>委托单位</td><td>委托单中的中文企业全称</td><td>未找到</td></tr></table></div></div><div class="vs">对比</div><div class="evidence-card"><div class="evidence-head"><span>检测报告 · 文件第 7 页</span><b>报告书_E202508277046-1EN(RD20).docx</b></div><div class="evidence-body"><span class="evidence-result">English name</span><table><tr><th>Field</th><th>Original text</th><th>Shared identifier</th></tr><tr><td>Applicant</td><td>Kindly Industrial Co., Ltd</td><td>Not found</td></tr></table></div></div>`,
+        meaning:'两份资料的名称字符串不同，但可能是同一企业的中英文名称。没有统一社会信用代码或地址等共同标识时，系统不会自动判定为不同主体。',
+        suggestion:'核对委托范围、企业地址或统一社会信用代码；确认后将人工判定记入审计记录。'
+      }
+    };
+    const evidenceDialog = document.getElementById('evidence-dialog');
+    function activateEvidenceCards() {
+      compareGrid.querySelectorAll('.evidence-card').forEach(card => {
+        card.setAttribute('role','button');
+        card.setAttribute('tabindex','0');
+        card.setAttribute('aria-label',`展开完整原文：${card.querySelector('.evidence-head b')?.textContent || '当前证据'}`);
+      });
+    }
+    function openEvidenceCard(card) {
+      const meta = card.querySelector('.evidence-head span')?.textContent || '当前证据位置';
+      const title = card.querySelector('.evidence-head b')?.textContent || '完整原文页';
+      document.getElementById('evidence-dialog-meta').textContent = meta;
+      document.getElementById('source-sheet-title').textContent = title;
+      openDialog(evidenceDialog);
+    }
+    activateEvidenceCards();
+    compareGrid.addEventListener('click', event => {
+      const card = event.target.closest('.evidence-card');
+      if (card) openEvidenceCard(card);
+    });
+    compareGrid.addEventListener('keydown', event => {
+      const card = event.target.closest('.evidence-card');
+      if (card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openEvidenceCard(card); }
+    });
+    document.querySelectorAll('[data-issue]').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('[data-issue]').forEach(item => item.classList.remove('selected'));
+      button.classList.add('selected');
+      const copy = issueCopy[button.dataset.issue];
+      document.getElementById('detail-state').textContent = copy[0];
+      document.getElementById('detail-heading').textContent = copy[1];
+      document.getElementById('detail-copy').textContent = copy[2];
+      const view = issueViews[button.dataset.issue];
+      compareGrid.innerHTML = view.evidence;
+      activateEvidenceCards();
+      document.getElementById('meaning-copy').textContent = view.meaning;
+      document.getElementById('suggestion-copy').textContent = view.suggestion;
+    }));
+
+    document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('[data-filter]').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      showToast(`已切换到“${button.textContent.trim()}”`);
+    }));
+  </script>
+</body>
+</html>

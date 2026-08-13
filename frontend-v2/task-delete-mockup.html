@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务删除 · 设计方案 — EMC 报告审核系统</title>
+<style>
+  :root {
+    --paper: #f5f7f5; --surface: #ffffff; --surface-2: #eef2f0; --surface-3: #e6ece9;
+    --ink: #17242b; --muted: #657278; --faint: #8b969a; --line: #d7dfdc; --line-strong: #bdc9c5;
+    --lab: #17685f; --lab-bright: #2c887c; --lab-soft: #e3f1ed;
+    --blue: #3e7185; --blue-soft: #e7eff3;
+    --evidence: #f1c84c; --evidence-soft: #fff4c6;
+    --danger: #bd4a3e; --danger-soft: #faebe7;
+    --warning: #ae7424; --success: #28745b; --success-soft: #e4f2eb;
+    --shadow: 0 10px 32px rgba(27,45,42,.07); --shadow-lg: 0 24px 70px rgba(13,28,27,.18);
+    --display: "Songti SC", "Noto Serif CJK SC", "STSong", serif;
+    --body: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--body); background: var(--paper); color: var(--ink);
+    padding: 48px 36px 80px; max-width: 1020px; margin: 0 auto;
+  }
+
+  /* ---- header ---- */
+  h1 { font: 600 32px/1.15 var(--display); letter-spacing: -.03em; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
+  .eyebrow { font: 10px var(--mono); letter-spacing: .16em; color: var(--faint); text-transform: uppercase; margin-bottom: 4px; }
+
+  /* ---- existing button system (from styles.css) ---- */
+  .primary-button, .secondary-button, .danger-button, .text-button, .icon-button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    min-height: 36px; padding: 8px 13px; border-radius: 4px;
+    border: 1px solid transparent; font-size: 12px; font-weight: 700;
+    cursor: pointer; transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    text-decoration: none; font-family: var(--body); white-space: nowrap;
+  }
+  .primary-button { color: #fff; background: var(--lab); border-color: var(--lab); }
+  .primary-button:hover { background: color-mix(in srgb, var(--lab) 86%, #000); transform: translateY(-1px); }
+  .secondary-button { color: var(--ink); background: var(--surface); border-color: var(--line); }
+  .secondary-button:hover { border-color: var(--line-strong); background: var(--surface-2); }
+  .danger-button { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
+  .danger-button:hover { border-color: var(--danger); }
+  .text-button { padding-inline: 8px; color: var(--muted); background: transparent; }
+  .text-button:hover { color: var(--ink); background: var(--surface-2); }
+  .icon-button { width: 36px; padding: 0; color: var(--muted); background: transparent; border-color: var(--line); }
+  .icon-button:hover { color: var(--ink); background: var(--surface-2); }
+  button:disabled, .primary-button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+  /* ---- task toolbar ---- */
+  .task-toolbar { display: grid; grid-template-columns: minmax(260px, 520px) 190px; gap: 10px; margin-bottom: 8px; }
+  .task-toolbar input, .task-toolbar select {
+    min-height: 42px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--surface); font-size: 13px; font-family: var(--body); color: var(--ink);
+  }
+  .task-count { margin: 18px 0 10px; color: var(--muted); font-size: 11px; }
+  .task-count b { color: var(--ink); font: 700 13px var(--mono); }
+
+  /* ---- task cards ---- */
+  .task-cards { display: grid; gap: 9px; }
+  .task-card {
+    position: relative; min-height: 136px; padding: 22px;
+    display: grid; grid-template-columns: 42px 1fr auto; align-items: center; gap: 18px;
+    border: 1px solid var(--line); background: var(--surface);
+    transition: border .15s, transform .15s, box-shadow .15s;
+  }
+  .task-card:hover { transform: translateY(-1px); border-color: var(--line-strong); box-shadow: var(--shadow); }
+
+  .task-card-mark { height: 72px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; align-items: end; }
+  .task-card-mark i { border-radius: 2px 2px 0 0; background: var(--surface-3); }
+  .task-card-mark i:nth-child(1){height:40%}
+  .task-card-mark i:nth-child(2){height:65%;background:var(--blue-soft)}
+  .task-card-mark i:nth-child(3){height:82%;background:var(--lab-soft)}
+  .task-card-mark i:nth-child(4){height:100%;background:var(--evidence-soft)}
+
+  .task-card-main > div:first-child { display: flex; align-items: center; gap: 10px; }
+  .task-card-main > div:first-child > small { color: var(--faint); font-size: 12px; }
+  .task-card h2 { margin: 9px 0 4px; font: 600 19px var(--display); }
+  .task-card p { margin: 0; color: var(--muted); font: 10px var(--mono); }
+  .task-metrics { margin-top: 16px; display: flex; gap: 24px; }
+  .task-metrics span { color: var(--muted); font-size: 12px; }
+  .task-metrics b { margin-right: 5px; color: var(--ink); font: 700 12px var(--mono); }
+  .task-metrics .needs-action, .task-metrics .needs-action b { color: var(--danger); }
+  .task-card-actions { display: flex; gap: 6px; align-items: center; }
+
+  /* status pills */
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+    border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .status-pill.neutral { background: var(--surface-3); color: var(--muted); }
+  .status-pill.neutral i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+  .status-pill.active { background: var(--lab-soft); color: var(--lab); }
+  .status-pill.active i { width: 6px; height: 6px; border-radius: 50%; background: var(--lab); }
+  .status-pill.success { background: var(--success-soft); color: var(--success); }
+  .status-pill.success i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+
+  /* menu dropdown */
+  .menu-wrap { position: relative; }
+  .menu-drop {
+    position: absolute; z-index: 20; right: 0; top: calc(100% + 6px); min-width: 160px;
+    padding: 6px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--surface); box-shadow: var(--shadow-lg);
+    display: none; flex-direction: column; gap: 2px;
+  }
+  .menu-wrap.open .menu-drop { display: flex; }
+  .menu-drop button {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px;
+    border: 0; border-radius: 4px; background: transparent;
+    font: 12px var(--body); color: var(--ink); cursor: pointer; text-align: left;
+  }
+  .menu-drop button:hover { background: var(--surface-2); }
+  .menu-drop button.danger { color: var(--danger); }
+  .menu-drop button.danger:hover { background: var(--danger-soft); }
+
+  /* ---- delete icon button variant ---- */
+  .icon-button.trash {}
+  .icon-button.trash:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+
+  /* ---- Modal ---- */
+  .overlay { position: fixed; inset: 0; background: rgba(13,28,27,.35); display: flex; align-items: center; justify-content: center; z-index: 999; }
+  .modal { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 28px 32px; max-width: 420px; width: 90%; box-shadow: var(--shadow-lg); }
+  .modal h4 { font: 600 17px var(--display); margin-bottom: 10px; }
+  .modal p { color: var(--muted); font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
+  .modal footer { display: flex; gap: 10px; justify-content: flex-end; }
+
+  h2 { font: 600 18px var(--body); margin: 48px 0 20px; display: flex; align-items: center; gap: 10px; }
+  h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+  .note { font-size: 12px; color: var(--muted); margin-bottom: 20px; padding: 10px 14px; border-left: 3px solid var(--evidence); background: var(--evidence-soft); line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<div class="eyebrow">AUDIT QUEUE</div>
+<h1>审核任务</h1>
+<p class="sub">案头之事，笔下之责。</p>
+
+<!-- ================================================================ -->
+<!-- APPROACH A: icon button in action area                             -->
+<!-- ================================================================ -->
+<h2>方案 A · 删除图标按钮</h2>
+<p class="note">在卡片右侧操作区增加一个 36×36 的垃圾桶图标按钮，沿用现有 <code>.icon-button</code> 尺寸和边框规范。hover 时边框和图标变为 <code>--danger</code> 红，背景变为 <code>--danger-soft</code> 浅红。仅可删除的任务显示，不可删除的不占位。</p>
+
+<div class="task-toolbar">
+  <input placeholder="搜索任务编号、产品或项目组" value="">
+  <select><option>需要动作</option><option>全部状态</option></select>
+</div>
+<div class="task-count"><b>4</b> 个任务符合当前条件</div>
+
+<div class="task-cards">
+  <!-- deletable: draft -->
+  <article class="task-card">
+    <div class="task-card-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="task-card-main">
+      <div><span class="status-pill neutral"><i></i>DRAFT</span><small>2025-08-08</small></div>
+      <h2>RE-2025-0031 无线模块辐射发射</h2>
+      <p>SET-8F3A · 华东检测三组</p>
+      <div class="task-metrics"><span><b>2/4</b>业务资料</span><span><b>—</b>机器发现</span><span><b>—</b>待处理</span></div>
+    </div>
+    <div class="task-card-actions">
+      <a class="secondary-button" href="#">打开任务 <span style="font-size:14px">→</span></a>
+      <button class="icon-button trash" title="删除草稿任务" aria-label="删除任务">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
+      </button>
+    </div>
+  </article>
+
+  <!-- deletable: incomplete -->
+  <article class="task-card">
+    <div class="task-card-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="task-card-main">
+      <div><span class="status-pill neutral"><i></i>INCOMPLETE</span><small>2025-08-07</small></div>
+      <h2>RE-2025-0028 电源端子骚扰电压</h2>
+      <p>SET-2D1B · 华南实验室</p>
+      <div class="task-metrics"><span><b>1/4</b>业务资料</span><span><b>—</b>机器发现</span><span><b>—</b>待处理</span></div>
+    </div>
+    <div class="task-card-actions">
+      <a class="secondary-button" href="#">打开任务 →</a>
+      <button class="icon-button trash" title="删除草稿任务" aria-label="删除任务">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
+      </button>
+    </div>
+  </article>
+
+  <!-- NOT deletable: locked — no trash button, menu has only relevant actions -->
+  <article class="task-card">
+    <div class="task-card-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="task-card-main">
+      <div><span class="status-pill active"><i></i>LOCKED</span><small>2025-08-06</small></div>
+      <h2>RE-2025-0019 工科医设备传导发射</h2>
+      <p>SET-7C4E · 华东检测三组</p>
+      <div class="task-metrics"><span><b>4/4</b>业务资料</span><span><b>12</b>机器发现</span><span class="needs-action"><b>3</b>待处理</span></div>
+    </div>
+    <div class="task-card-actions">
+      <a class="secondary-button" href="#">打开任务 →</a>
+      <!-- no trash: locked task cannot be deleted -->
+    </div>
+  </article>
+
+  <!-- reviewed: has revision action in menu, but no delete -->
+  <article class="task-card">
+    <div class="task-card-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="task-card-main">
+      <div><span class="status-pill success"><i></i>REVIEWED</span><small>2025-08-05</small></div>
+      <h2>RE-2025-0012 信息技术设备辐射骚扰</h2>
+      <p>SET-9A2F · 总部实验室</p>
+      <div class="task-metrics"><span><b>4/4</b>业务资料</span><span><b>8</b>机器发现</span><span><b>0</b>待处理</span></div>
+    </div>
+    <div class="task-card-actions">
+      <a class="secondary-button" href="#">打开任务 →</a>
+      <div class="menu-wrap">
+        <button class="icon-button" aria-label="更多操作" onclick="this.parentElement.classList.toggle('open')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>
+        <div class="menu-drop">
+          <button>创建修订 <span style="margin-left:auto;font-size:9px;color:var(--faint)">⌘R</span></button>
+        </div>
+      </div>
+    </div>
+  </article>
+</div>
+
+<!-- ================================================================ -->
+<!-- APPROACH B: always-visible menu                                    -->
+<!-- ================================================================ -->
+<h2>方案 B · 统一更多菜单</h2>
+<p class="note">每张卡片右侧始终显示 <code>⋯</code> 菜单按钮（不再条件隐藏）。菜单中根据状态提供「删除草稿」或「创建修订」。可操作时菜单按钮正常显示，无可操作项时按钮变灰。用户总能找到一个统一的操作入口。</p>
+
+<div class="task-toolbar">
+  <input placeholder="搜索任务编号、产品或项目组" value="">
+  <select><option>需要动作</option></select>
+</div>
+<div class="task-count"><b>3</b> 个任务符合当前条件</div>
+
+<div class="task-cards">
+  <!-- draft: menu has delete -->
+  <article class="task-card">
+    <div class="task-card-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="task-card-main">
+      <div><span class="status-pill neutral"><i></i>DRAFT</span><small>2025-08-08</small></div>
+      <h2>RE-2025-0031 无线模块辐射发射</h2>
+      <p>SET-8F3A · 华东检测三组</p>
+      <div class="task-metrics"><span><b>2/4</b>业务资料</span><span><b>—</b>机器发现</span><span><b>—</b>待处理</span></div>
+    </div>
+    <div class="task-card-actions">
+      <a class="secondary-button" href="#">打开任务 →</a>
+      <div class="menu-wrap open">
+        <button class="icon-button" aria-label="更多操作" onclick="this.parentElement.classList.toggle('open')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>
+        <div class="menu-drop">
+          <button class="danger">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6"/></svg>
+            删除草稿
+          </button>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- reviewed: menu has revision -->
+  <article class="task-card">
+    <div class="task-card-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="task-card-main">
+      <div><span class="status-pill success"><i></i>REVIEWED</span><small>2025-08-05</small></div>
+      <h2>RE-2025-0012 信息技术设备辐射骚扰</h2>
+      <p>SET-9A2F · 总部实验室</p>
+      <div class="task-metrics"><span><b>4/4</b>业务资料</span><span><b>8</b>机器发现</span><span><b>0</b>待处理</span></div>
+    </div>
+    <div class="task-card-actions">
+      <a class="secondary-button" href="#">打开任务 →</a>
+      <div class="menu-wrap">
+        <button class="icon-button" aria-label="更多操作" onclick="this.parentElement.classList.toggle('open')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>
+        <div class="menu-drop">
+          <button>创建修订</button>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- locked: menu has nothing useful -->
+  <article class="task-card">
+    <div class="task-card-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="task-card-main">
+      <div><span class="status-pill active"><i></i>LOCKED</span><small>2025-08-06</small></div>
+      <h2>RE-2025-0019 工科医设备传导发射</h2>
+      <p>SET-7C4E · 华东检测三组</p>
+      <div class="task-metrics"><span><b>4/4</b>业务资料</span><span><b>12</b>机器发现</span><span class="needs-action"><b>3</b>待处理</span></div>
+    </div>
+    <div class="task-card-actions">
+      <a class="secondary-button" href="#">打开任务 →</a>
+      <button class="icon-button" disabled aria-label="无可用操作" title="已锁定任务无额外操作">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+      </button>
+    </div>
+  </article>
+</div>
+
+<!-- ================================================================ -->
+<!-- Delete confirmation Modal (shared by both approaches)             -->
+<!-- ================================================================ -->
+<div class="overlay">
+  <div class="modal">
+    <h4>删除草稿任务？</h4>
+    <p>该操作会删除 <b>RE-2025-0031 无线模块辐射发射</b> 及其全部上传资料，<b>不能撤销</b>。已锁定或已审核的任务不会提供此操作。</p>
+    <footer>
+      <button class="secondary-button">取消</button>
+      <button class="primary-button" style="background:var(--danger);border-color:var(--danger);">确认删除</button>
+    </footer>
+  </div>
+</div>
+
+</body>
+</html>

@@ -6,14 +6,16 @@ extract ALL items (instruments, data rows) with per-field confidence metadata.
 
 from __future__ import annotations
 
+import io
 import re
 import time
+from collections import defaultdict
 from utils.logger import get_logger
-from utils.pdf_utils import extract_pdf_text
+from utils.pdf_utils import extract_pdf_text, extract_text as _extract_file_text
 from services.prompts import (
     REPORT_PROMPT, UNIVERSAL_TEST_ITEM_PROMPT,
 )
-from services.deepseek_client import _parse_json
+from services.deepseek_client import _is_billing_or_auth_error
 from services.exceptions import ExtractionError, SizeLimitError
 from models import (
     ReportData, ReportCoverInfo, ReportResultItem,
@@ -39,6 +41,12 @@ def _safe_float(val) -> float | None:
 
 
 _TEST_CODE_RE = re.compile(r'EQ/[A-Z]{2}\d+')
+_LAB_SAMPLE_ID_RE = re.compile(r"(?i)\bE\d{10,}-\d{4}\b")
+_NUMBER_UNIT_RE = re.compile(
+    r"(?:±|[<>≤≥]?[-+]?)\s*\d+(?:\.\d+)?\s*"
+    r"(?:mΩ|kΩ|MΩ|mV|kV|V|mA|A|Hz|kHz|MHz|ms|min|s|%)",
+    re.IGNORECASE,
+)
 
 
 def count_test_codes(text: str) -> set[str]:
@@ -281,7 +289,7 @@ class ReportExtractor:
         r'(限值|LIMIT|测试规范|TEST\s*SPECIFICATION|'
         r'测试程序|TEST\s*PROCEDURE|'
         r'测试要求|TEST\s*REQUIREMENT|'
-        r'测试结果|TEST\s*RESULT|检测结果|试验结果|'
+        r'测试结果|TEST\s*RESULTS?|检测结果|试验结果|'
         r'背景数据|BACKGROUND)',
         re.IGNORECASE,
     )
@@ -373,6 +381,63 @@ class ReportExtractor:
         return sections
 
     @staticmethod
+    def _split_by_result_item(raw_text: str, results: list) -> list[tuple[str, str]]:
+        """Split code-less reports using reviewed result names as body headings.
+
+        Some electrical-performance reports number their chapters only in the
+        rendered TOC and repeat the item name without an ``EQ/...`` code in the
+        body.  A bare name match is unsafe because the same text also occurs in
+        summary and result tables.  Treat it as a chapter heading only when it
+        is a standalone line immediately followed by a known specification or
+        requirement subsection.
+        """
+        headings: list[tuple[int, str]] = []
+        seen_positions: set[int] = set()
+        following_section = (
+            r"(?:TEST\s*SPECIFICATION|TEST\s*REQUIREMENTS?|"
+            r"LIMITS?|测试规范|试验规范|测试要求|试验要求|限值)"
+        )
+        for index, result in enumerate(results):
+            name = str(getattr(result, "test_item", "") or "").strip()
+            if not name:
+                continue
+            flexible_name = r"\s+".join(re.escape(part) for part in name.split())
+            # Code-less Chinese reports commonly use a numbered major chapter
+            # (``5. 项目名称``) followed by a numbered specification section
+            # (``5.1 测试规范``).  Requiring the item name and subsection label
+            # to be standalone adjacent lines silently dropped every execution
+            # table in that otherwise well-structured layout.
+            pattern = re.compile(
+                rf"(?im)^[ \t]*(?:\d{{1,3}}[.．、]\s*)?"
+                rf"{flexible_name}[ \t]*\r?\n"
+                rf"(?:[ \t]*\r?\n){{0,6}}[ \t]*"
+                rf"(?:\d{{1,3}}(?:[.．]\d{{1,3}})+\s*)?"
+                rf"{following_section}[ \t]*$",
+            )
+            match = pattern.search(raw_text)
+            if match is None or match.start() in seen_positions:
+                continue
+            seen_positions.add(match.start())
+            headings.append((match.start(), f"ITEM_{index + 1}"))
+
+        headings.sort(key=lambda item: item[0])
+        sections: list[tuple[str, str]] = []
+        for index, (position, code) in enumerate(headings):
+            next_position = headings[index + 1][0] if index + 1 < len(headings) else len(raw_text)
+            section_text = raw_text[position:next_position]
+            filtered = ReportExtractor._filter_subsections(
+                section_text[:ReportExtractor._MAX_ITEM_SECTION_CHARS]
+            )
+            if filtered.strip():
+                sections.append((code, filtered))
+        logger.info(
+            "split_by_result_item_done",
+            result_count=len(results),
+            section_count=len(sections),
+        )
+        return sections
+
+    @staticmethod
     def _filter_subsections(section_text: str) -> str:
         """Keep 限值/测试规范 + 测试程序 + 测试结果, skip 布置/照片/附录.
 
@@ -412,6 +477,24 @@ class ReportExtractor:
                         keep_depth = depth
                 header_ended = True
             else:
+                # Code-less report bodies often use unnumbered all-caps
+                # subsection headings.  Recognize only the explicit keep/skip
+                # vocabulary so ordinary result rows cannot alter the state.
+                stripped = line.strip()
+                looks_like_heading = (
+                    len(stripped) <= 120
+                    and (not any(char.isalpha() for char in stripped) or stripped == stripped.upper())
+                )
+                keep_match = ReportExtractor._KEEP_SUBSECTION_RE.search(stripped)
+                skip_match = ReportExtractor._SKIP_SUBSECTION_RE.search(stripped)
+                if stripped and looks_like_heading and (keep_match or skip_match):
+                    if current_part and current_keep:
+                        result_parts.append('\n'.join(current_part))
+                    current_part = [line]
+                    current_keep = bool(keep_match) and not bool(skip_match)
+                    keep_depth = 2 if current_keep else None
+                    header_ended = True
+                    continue
                 if not header_ended:
                     current_keep = True
                 current_part.append(line)
@@ -426,73 +509,46 @@ class ReportExtractor:
                             pass_name: str, max_tokens: int,
                             timeout: int | None = None,
                             max_text_len: int = 0) -> dict:
-        """Make a single AI call with retry logic for one extraction pass.
+        """Make a single AI call for one extraction pass.
+
+        Uses the shared _call_api which handles transient retries internally
+        and fails fast on billing/auth errors (401/402/403).
 
         Args:
             max_text_len: if > 0, truncate raw_text to this many chars
-                          (keeps the END of text when truncating, since
-                           data sections are typically later in the doc).
+                          (keeps the HEAD of text, since both structural and
+                           data sections are typically at the beginning).
 
         Returns the parsed JSON dict, or {} on failure.
         """
-        from config import DEEPSEEK_MODEL, DEEPSEEK_MODEL_DATA
+        from services.llm_policy import get_llm_policy
         timeout = timeout or ReportExtractor.TIMEOUT_SEC
+        model = get_llm_policy("structured_extraction").model
 
-        # Use per-pass model if available, else default
-        if pass_name in ('instruments',) or pass_name.startswith('data_rows/'):
-            model = DEEPSEEK_MODEL_DATA
-        else:
-            model = DEEPSEEK_MODEL
-
-        # Truncate text if requested (prefer head for structural, tail for data)
+        # Truncate text if requested
         text = raw_text
         if max_text_len > 0 and len(text) > max_text_len:
-            if pass_name == 'structural':
-                text = text[:max_text_len]  # cover info is at the beginning
-            else:
-                text = text[:max_text_len]  # instruments + data: also head by default
+            text = text[:max_text_len]
 
-        for attempt in range(ReportExtractor.MAX_RETRIES + 1):  # initial + retries
-            try:
-                resp = await reviewer.client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "你是 EMC 检测报告解析专家，严格按 JSON 格式输出。"},
-                        {"role": "user", "content": prompt + text},
-                    ],
-                    temperature=0, timeout=timeout,
-                    max_tokens=max_tokens,
-                )
-                content = resp.choices[0].message.content
-                if not content:
-                    logger.warning("ai_empty_response", pass_name=pass_name,
-                                  attempt=attempt + 1)
-                    if attempt < ReportExtractor.MAX_RETRIES:
-                        await asyncio.sleep(2.0 * (2 ** attempt))
-                        continue
-                    return {}
+        try:
+            result = await reviewer._call_api(
+                prompt=f"文档内容：\n{text}",
+                stage=pass_name,
+                timeout=timeout,
+                system_prompt=prompt,
+                max_tokens=max_tokens,
+                task_kind="structured_extraction",
+                max_retries=1,
+            )
+            if result:
                 logger.info("ai_pass_done", pass_name=pass_name,
-                           attempt=attempt + 1, model=model,
-                           text_len=len(text))
-                logger.debug("ai_raw_response", pass_name=pass_name,
-                           content_head=content[:300], content_len=len(content))
-                result = _parse_json(content)
-                if not result and attempt < ReportExtractor.MAX_RETRIES:
-                    logger.warning("ai_empty_parse_retry", pass_name=pass_name,
-                                  attempt=attempt + 1, raw_head=content[:500])
-                    await asyncio.sleep(2.0 * (2 ** attempt))
-                    continue
-                return result
-            except Exception as e:
-                if attempt < ReportExtractor.MAX_RETRIES:
-                    logger.warning("ai_pass_retry", pass_name=pass_name,
-                                  attempt=attempt + 1, error=str(e),
-                                  model=model)
-                    await asyncio.sleep(2.0 * (2 ** attempt))
-                else:
-                    logger.error("ai_pass_exhausted", pass_name=pass_name,
-                                retries=ReportExtractor.MAX_RETRIES, error=str(e))
-        return {}
+                           model=model, text_len=len(text))
+            return result
+        except Exception as e:
+            if _is_billing_or_auth_error(e):
+                raise  # propagate billing/auth errors immediately
+            logger.warning("ai_pass_failed", pass_name=pass_name, error=str(e)[:200])
+            return {}
 
     @staticmethod
     def _parse_structural(result: dict) -> tuple[ReportCoverInfo, list[ReportResultItem],
@@ -745,6 +801,451 @@ class ReportExtractor:
     # ── Code-level validation (deterministic, no AI) ────────────────────
 
     @staticmethod
+    def _item_sample_coverage_gap(
+        raw_text: str,
+        items: list[TestItemExtraction],
+    ) -> tuple[int, int, int]:
+        """Compare explicit source sample IDs with per-item extracted blocks."""
+        source_ids = {match.group(0).casefold() for match in _LAB_SAMPLE_ID_RE.finditer(raw_text)}
+        extracted_ids = {
+            block.sample_id.strip().casefold()
+            for item in items
+            for block in item.test_results.sample_data
+            if block.sample_id.strip()
+        }
+        return len(source_ids), len(extracted_ids), len(source_ids - extracted_ids)
+
+    @staticmethod
+    def _compact_docx_cells(cells) -> list[str]:
+        """Return visible cell values without merged-cell repetitions."""
+        values: list[str] = []
+        previous_tc = None
+        for cell in cells:
+            # python-docx returns the same underlying ``w:tc`` once for every
+            # grid column covered by a horizontal merge.  Compare cell
+            # identity instead of text: two real adjacent columns are allowed
+            # to contain the same value (for example required=C, actual=C).
+            if cell._tc is previous_tc:
+                continue
+            previous_tc = cell._tc
+            value = re.sub(r"\s+", " ", str(cell.text or "")).strip()
+            if value:
+                values.append(value)
+        return values
+
+    @staticmethod
+    def _docx_label_value(rows: list[list[str]], labels: tuple[str, ...]) -> str:
+        normalized_labels = {
+            re.sub(r"[\s:：.]+", "", label).casefold() for label in labels
+        }
+        for row in rows:
+            for index, value in enumerate(row):
+                normalized = re.sub(r"[\s:：.]+", "", value).casefold()
+                if normalized not in normalized_labels:
+                    continue
+                for candidate in row[index + 1:]:
+                    candidate_normalized = re.sub(
+                        r"[\s:：.]+", "", candidate,
+                    ).casefold()
+                    if candidate_normalized not in normalized_labels:
+                        return candidate
+        return ""
+
+    @staticmethod
+    def _extract_docx_table_items(
+        file_bytes: bytes,
+        summary_results: list[ReportResultItem],
+    ) -> tuple[list[TestItemExtraction], dict[str, int]]:
+        """Deterministically transcribe repeated DOCX execution tables.
+
+        Many laboratory reports repeat a small identity table followed by a
+        result table.  LLM section extraction is still used for prose and test
+        specifications, but it must not be the only counter of executions.
+        This parser is schema-driven (header labels), so it is independent of
+        a vendor's item names and preserves duplicate sample/mode blocks.
+        """
+        if not file_bytes.startswith(b"PK"):
+            return [], {}
+        try:
+            from docx import Document
+            document = Document(io.BytesIO(file_bytes))
+        except Exception as exc:
+            logger.warning(
+                "docx_execution_inventory_unavailable",
+                error_type=type(exc).__name__,
+            )
+            return [], {}
+
+        blocks: list[tuple[str, str, str, list[UniversalDataRow], int]] = []
+        for table_index, table in enumerate(document.tables[:-1]):
+            identity_rows = [
+                ReportExtractor._compact_docx_cells(row.cells)
+                for row in table.rows
+            ]
+            sample_id = ReportExtractor._docx_label_value(
+                identity_rows, ("Sample No.", "Sample No", "样品编号"),
+            )
+            mode = ReportExtractor._docx_label_value(
+                identity_rows, ("Test Mode", "测试模式", "工作模式"),
+            )
+            if not _LAB_SAMPLE_ID_RE.fullmatch(sample_id.strip()) or not mode:
+                continue
+
+            result_table = document.tables[table_index + 1]
+            result_rows = [
+                ReportExtractor._compact_docx_cells(row.cells)
+                for row in result_table.rows
+            ]
+            if not result_rows:
+                continue
+            header = " ".join(result_rows[0]).casefold()
+            header_cells = {
+                re.sub(r"\s+", "", value).casefold()
+                for value in result_rows[0]
+            }
+            if not (
+                ("test item" in header or "测试项目" in header)
+                and (
+                    "result" in header
+                    or "测试结果" in header
+                    or "试验结果" in header
+                    or "结果" in header_cells
+                    or "判定" in header_cells
+                )
+                and ("performance" in header or "性能等级" in header)
+            ):
+                continue
+
+            rows: list[UniversalDataRow] = []
+            row_item_names: list[str] = []
+            for values in result_rows[1:]:
+                if len(values) < 7:
+                    continue
+                verdict = values[-1].strip()
+                if not re.search(
+                    r"(?i)(?:不\s*)?pass|fail|符合|不符合|合格|不合格|\bng\b|\bok\b",
+                    verdict,
+                ):
+                    continue
+                item_name = values[0].strip()
+                row_item_names.append(item_name)
+                rows.append(UniversalDataRow(
+                    test_item=item_name,
+                    injection_point=values[1].strip(),
+                    spec_requirement=values[2].strip(),
+                    test_duration=values[3].strip(),
+                    required_level=values[4].strip(),
+                    actual_level=values[5].strip(),
+                    verdict=verdict,
+                ))
+            if not rows:
+                continue
+            signature = "\x1f".join(dict.fromkeys(
+                re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", name.casefold())
+                for name in row_item_names if name
+            ))
+            blocks.append((sample_id.strip(), mode.strip(), signature, rows, table_index))
+
+        if not blocks:
+            return [], {}
+
+        # Consecutive execution blocks with the same row schema belong to one
+        # result chapter.  This also preserves an accidental duplicate block
+        # as evidence instead of silently deduplicating it.
+        groups: list[list[tuple[str, str, str, list[UniversalDataRow], int]]] = []
+        for block in blocks:
+            if groups and groups[-1][0][2] == block[2]:
+                groups[-1].append(block)
+            else:
+                groups.append([block])
+
+        items: list[TestItemExtraction] = []
+        previous_result_table_index = -1
+        for index, group in enumerate(groups):
+            fallback_name = group[0][3][0].test_item
+            summary_name = (
+                summary_results[index].test_item.strip()
+                if len(summary_results) == len(groups) else ""
+            )
+            item_name = summary_name or fallback_name
+            sample_data = [
+                SampleResultBlock(
+                    sample_id=sample_id,
+                    mode=mode,
+                    data_rows=rows,
+                )
+                for sample_id, mode, _, rows, _ in group
+            ]
+            first_identity_table_index = group[0][4]
+            prelude_tables = document.tables[
+                previous_result_table_index + 1:first_identity_table_index
+            ]
+            previous_result_table_index = group[-1][4] + 1
+            spec_parameters: list[dict[str, str]] = []
+            required_levels: set[str] = set()
+            for prelude_table in prelude_tables:
+                prelude_rows = [
+                    ReportExtractor._compact_docx_cells(row.cells)
+                    for row in prelude_table.rows
+                ]
+                header_text = " ".join(prelude_rows[0] if prelude_rows else []).casefold()
+                if any(token in header_text for token in (
+                    "manufacturer", "serial number", "calibration", "制造商", "系列号", "校准",
+                )):
+                    continue
+                all_table_text = " ".join(
+                    value for row in prelude_rows for value in row
+                ).casefold()
+                is_spec_table = any(token in all_table_text for token in (
+                    "test requirement", "requirement", "functional status",
+                    "functional classes", "severity level", "offset voltage",
+                    "start voltage", "test time", "测试要求", "性能等级",
+                )) or bool(
+                    prelude_rows and prelude_rows[0]
+                    and prelude_rows[0][0].strip().casefold() in {"un", "ua"}
+                )
+                if not is_spec_table:
+                    continue
+                severity_table = "severity" in header_text and any(
+                    "upp" in value.casefold() for value in (prelude_rows[0] if prelude_rows else [])
+                )
+                for values in prelude_rows[1:] if prelude_rows else []:
+                    if len(values) < 2:
+                        continue
+                    last_value = values[-1].strip()
+                    if (
+                        "functional" in header_text or "性能" in header_text
+                        or any(token in values[0].casefold() for token in (
+                            "function status", "functional status", "性能等级",
+                        ))
+                    ):
+                        required_levels.update(
+                            value.upper() for value in re.findall(
+                                r"(?i)(?<![A-Z])([A-E])(?![A-Z])", last_value,
+                            )
+                        )
+                    if severity_table and re.fullmatch(r"\d+", values[0]):
+                        numeric_values = [
+                            re.sub(r"\s+", "", match.group(0))
+                            for match in _NUMBER_UNIT_RE.finditer(last_value)
+                        ]
+                        if numeric_values:
+                            spec_parameters.append({
+                                "name": f"Severity {values[0]}",
+                                "value": numeric_values[0],
+                            })
+                        continue
+                    if (
+                        len(values) >= 4
+                        and "requirement" in header_text
+                        and "functional" in header_text
+                    ):
+                        name = values[1].strip()
+                        parameter_value = values[2].strip()
+                    elif (
+                        len(values) >= 3
+                        and "functional" in header_text
+                        and re.search(r"[:：]", values[0])
+                    ):
+                        name, parameter_value = re.split(
+                            r"[:：]", values[0], maxsplit=1,
+                        )
+                        name = name.strip()
+                        parameter_value = parameter_value.strip()
+                    else:
+                        name = values[0].strip()
+                        parameter_value = last_value
+                    if (
+                        not name
+                        or re.fullmatch(r"\d+", name)
+                        or name.casefold() in {
+                            "test item", "item", "test requirement", "requirement",
+                            "functional status", "functional classes",
+                        }
+                    ):
+                        continue
+                    numeric_values = [
+                        re.sub(r"\s+", "", match.group(0))
+                        for match in _NUMBER_UNIT_RE.finditer(parameter_value)
+                    ]
+                    if numeric_values and len(parameter_value) <= 180:
+                        spec_parameters.append({
+                            "name": name,
+                            "value": parameter_value,
+                        })
+            deduplicated_parameters: list[dict[str, str]] = []
+            seen_parameters: set[tuple[str, str]] = set()
+            for parameter in spec_parameters:
+                key = (parameter["name"].casefold(), parameter["value"].casefold())
+                if key not in seen_parameters:
+                    seen_parameters.add(key)
+                    deduplicated_parameters.append(parameter)
+            spec_parameters = deduplicated_parameters
+            items.append(TestItemExtraction(
+                test_type="immunity",
+                test_item_code=f"DOCX_TABLE_{index + 1}",
+                test_item_name=item_name,
+                spec_parameters=spec_parameters,
+                required_level=(
+                    next(iter(required_levels)) if len(required_levels) == 1 else ""
+                ),
+                test_results=TestResultsSection(sample_data=sample_data),
+            ))
+
+        pair_counts: dict[tuple[str, str], int] = defaultdict(int)
+        for sample_id, mode, _, _, _ in blocks:
+            pair_counts[(sample_id.casefold(), mode.casefold())] += 1
+        metrics = {
+            "docx_execution_block_count": len(blocks),
+            "docx_execution_pair_count": len(pair_counts),
+            "docx_duplicate_execution_pair_count": sum(
+                1 for count in pair_counts.values() if count > 1
+            ),
+            "docx_execution_group_count": len(groups),
+        }
+        return items, metrics
+
+    @staticmethod
+    def _extract_docx_instruments(
+        file_bytes: bytes,
+    ) -> tuple[list[ReportInstrument], dict[str, int]]:
+        """Transcribe instrument inventories from labelled DOCX tables.
+
+        A group row containing only a test-item name applies to the physical
+        instrument rows that follow it.  The parser depends on column roles,
+        not on a laboratory's item names or a fixed table index.
+        """
+        if not file_bytes.startswith(b"PK"):
+            return [], {}
+        try:
+            from docx import Document
+            document = Document(io.BytesIO(file_bytes))
+        except Exception as exc:
+            logger.warning(
+                "docx_instrument_inventory_unavailable",
+                error_type=type(exc).__name__,
+            )
+            return [], {}
+
+        instruments: list[ReportInstrument] = []
+        physical_count = 0
+        for table in document.tables:
+            rows = [
+                ReportExtractor._compact_docx_cells(row.cells)
+                for row in table.rows
+            ]
+            if not rows:
+                continue
+            header = [value.casefold() for value in rows[0]]
+            joined_header = " ".join(header)
+            if not (
+                ("equipment" in joined_header or "仪器" in joined_header)
+                and ("manufacturer" in joined_header or "制造商" in joined_header)
+                and (
+                    "serial" in joined_header
+                    or "编号" in joined_header
+                    or "系列号" in joined_header
+                    or "序列号" in joined_header
+                )
+                and ("calibration" in joined_header or "校准" in joined_header)
+            ):
+                continue
+            current_item = ""
+            for values in rows[1:]:
+                if len(values) == 1:
+                    current_item = values[0].strip()
+                    continue
+                if len(values) < 5:
+                    continue
+                entry = ReportInstrument(
+                    test_item=current_item,
+                    name=values[0].strip(),
+                    manufacturer=values[1].strip(),
+                    model=values[2].strip(),
+                    serial_no=values[3].strip(),
+                    calibration_end=values[4].strip(),
+                )
+                if not entry.name or not current_item:
+                    continue
+                instruments.append(entry)
+                if all(
+                    value and value not in {"/", "-"}
+                    for value in (
+                        entry.manufacturer, entry.model, entry.serial_no,
+                        entry.calibration_end,
+                    )
+                ):
+                    physical_count += 1
+        return instruments, {
+            "docx_instrument_row_count": len(instruments),
+            "docx_physical_instrument_row_count": physical_count,
+        }
+
+    @staticmethod
+    def _merge_docx_instruments(
+        llm_instruments: list[ReportInstrument],
+        table_instruments: list[ReportInstrument],
+    ) -> list[ReportInstrument]:
+        """Use complete source tables when available, without duplicating rows."""
+        if not table_instruments:
+            return llm_instruments
+        table_keys = {
+            tuple(str(getattr(item, field) or "").strip().casefold() for field in (
+                "test_item", "name", "manufacturer", "model", "serial_no",
+                "calibration_end",
+            ))
+            for item in table_instruments
+        }
+        extras = [
+            item for item in llm_instruments
+            if tuple(str(getattr(item, field) or "").strip().casefold() for field in (
+                "test_item", "name", "manufacturer", "model", "serial_no",
+                "calibration_end",
+            )) not in table_keys
+        ]
+        return [*table_instruments, *extras]
+
+    @staticmethod
+    def _merge_docx_table_items(
+        llm_items: list[TestItemExtraction],
+        table_items: list[TestItemExtraction],
+    ) -> list[TestItemExtraction]:
+        """Keep LLM prose/spec fields but make source tables authoritative."""
+        if not table_items:
+            return llm_items
+        merged: list[TestItemExtraction] = []
+        used: set[int] = set()
+        for table_item in table_items:
+            table_key = re.sub(
+                r"[^0-9a-z\u4e00-\u9fff]+", "",
+                table_item.test_item_name.casefold(),
+            )
+            match_index = next((
+                index for index, item in enumerate(llm_items)
+                if index not in used and re.sub(
+                    r"[^0-9a-z\u4e00-\u9fff]+", "",
+                    item.test_item_name.casefold(),
+                ) == table_key
+            ), None)
+            if match_index is None and len(llm_items) == len(table_items):
+                match_index = len(merged)
+            if match_index is None or match_index >= len(llm_items):
+                merged.append(table_item)
+                continue
+            used.add(match_index)
+            item = llm_items[match_index]
+            item.test_results.sample_data = table_item.test_results.sample_data
+            if table_item.spec_parameters:
+                item.spec_parameters = table_item.spec_parameters
+            if table_item.required_level:
+                item.required_level = table_item.required_level
+            if not item.test_item_name:
+                item.test_item_name = table_item.test_item_name
+            merged.append(item)
+        merged.extend(item for index, item in enumerate(llm_items) if index not in used)
+        return merged
+
+    @staticmethod
     def _validate_emission_formula(items: list[TestItemExtraction]) -> list[ValidationIssue]:
         """Check: result = reading + correction, margin = limit - result."""
         issues: list[ValidationIssue] = []
@@ -886,12 +1387,12 @@ class ReportExtractor:
     # ── Main extraction entry point ─────────────────────────────────────
 
     @staticmethod
-    async def extract(file_bytes: bytes, reviewer=None) -> ReportData:
+    async def extract(file_bytes: bytes, filename: str = "", reviewer=None) -> ReportData:
         """Multi-pass extraction with zero data omission.
 
         Pass 0 (code): TOC extraction via regex.
-        Pass 1 (AI):   structural — cover, results, sample.  ~9K tokens, serial.
-        Pass 2 (AI):   all instruments — parallel with Pass 3.  ~22K tokens.
+        Pass 1 (AI):   structural — cover, results, sample, serial.
+        Pass 2 (AI):   all instruments — parallel with Pass 3.
         Pass 3 (AI):   data rows — grouped by test-code prefix, N parallel calls.
         Aggregate:     merge + deduplicate, save once.
         """
@@ -900,7 +1401,7 @@ class ReportExtractor:
         if len(file_bytes) > MAX_FILE_SIZE:
             raise SizeLimitError("report.pdf", len(file_bytes))
         try:
-            raw_text = extract_pdf_text(file_bytes)
+            raw_text = _extract_file_text(file_bytes, filename) if filename else extract_pdf_text(file_bytes)
         except Exception as e:
             raise ExtractionError(f"文档文本提取失败: {e}") from e
         if not raw_text.strip():
@@ -910,13 +1411,14 @@ class ReportExtractor:
             from services.deepseek_client import DeepSeekReviewer
             reviewer = DeepSeekReviewer()
 
-        from config import DEEPSEEK_MODEL
+        from services.llm_policy import get_llm_policy
         from services.prompts import (
             REPORT_STRUCTURAL_PROMPT, REPORT_INSTRUMENTS_PROMPT,
             build_data_rows_prompt,
         )
         t0 = time.time()
-        log = logger.bind(doc_type="report", model=DEEPSEEK_MODEL,
+        log = logger.bind(doc_type="report",
+                         model=get_llm_policy("structured_extraction").model,
                          text_length=len(raw_text))
 
         log.info("multi_pass_extract_start")
@@ -944,7 +1446,7 @@ class ReportExtractor:
         p1_start = time.time()
         struct_result = await ReportExtractor._call_ai_pass(
             reviewer, REPORT_STRUCTURAL_PROMPT, struct_text,
-            pass_name="structural", max_tokens=8192,
+            pass_name="structural", max_tokens=16384,
         )
         p1_dur = round((time.time() - p1_start) * 1000)
 
@@ -961,14 +1463,33 @@ class ReportExtractor:
             log.error("structural_parse_failed", error=str(e))
             raise ExtractionError(f"检测报告结构数据解析失败: {e}") from e
 
-        if not cover.report_number and not cover.sample_name:
+        # Draft/template reports can intentionally leave both identity fields
+        # blank while still containing a complete result body.  Treat that as
+        # a partial extraction so downstream document checks can report the
+        # missing/placeholder cover fields with source evidence.  Rejecting the
+        # whole document here made those checks unreachable.
+        cover_identity_absent = not cover.report_number and not cover.sample_name
+        cover_identity_missing = not cover.report_number or not cover.sample_name
+        if cover_identity_absent and not results:
             raise ExtractionError(
-                "封面信息为空（AI 可能未提取到数据）",
-                [{"errors": ["封面 report_number 和 sample_name 均为空"]}],
+                "封面信息和测试结果均为空（AI 可能未提取到数据）",
+                [{"errors": ["封面 report_number、sample_name 和测试结果均为空"]}],
+            )
+        if cover_identity_missing:
+            log.warning(
+                "cover_identity_missing",
+                duration_ms=p1_dur,
+                results_count=len(results),
             )
 
         log.info("pass_done", pass_name="structural", duration_ms=p1_dur,
                 results_count=len(results))
+
+        if not results and any(marker in raw_text for marker in ("检测依据", "测试结果", "试验结果", "测试项目", "试验项目")):
+            raise ExtractionError(
+                "检测报告结构提取失败：文档包含测试/试验项目线索，但 AI 未提取任何测试结果项",
+                [{"errors": ["Pass 1 (structural) returned no test result items"]}],
+            )
 
         # ── Run Pass 2 + per-item extractions in parallel ─────────────
         from config import MAX_CONCURRENT_AI_CALLS
@@ -986,17 +1507,19 @@ class ReportExtractor:
         async def _run_pass2():
             return await _call_with_semaphore(
                 "instruments", REPORT_INSTRUMENTS_PROMPT, instr_text,
-                max_tokens=16384, timeout=300,
+                max_tokens=32768, timeout=120,
             )
 
         # Per-item extraction tasks
         item_sections = ReportExtractor._split_by_test_item(raw_text, toc_items)
+        if not item_sections:
+            item_sections = ReportExtractor._split_by_result_item(raw_text, results)
 
         async def _run_item_extraction(code: str, section_text: str):
             prompt = UNIVERSAL_TEST_ITEM_PROMPT
             return await _call_with_semaphore(
                 f"item/{code}", prompt, section_text,
-                max_tokens=8192, timeout=300,
+                max_tokens=16384, timeout=90,
             )
 
         p2_start = time.time()
@@ -1018,7 +1541,7 @@ class ReportExtractor:
                 section_text = raw_text[:ReportExtractor._MAX_ITEM_SECTION_CHARS]
                 parallel_tasks.append(_call_with_semaphore(
                     f"data_rows/{prefix}", prompt, section_text,
-                    max_tokens=8192,
+                    max_tokens=16384,
                 ))
 
         parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
@@ -1030,6 +1553,8 @@ class ReportExtractor:
         all_item_extractions: list[TestItemExtraction] = []
         all_data_rows: list[ReportDataRow] = []
         failed_passes: list[str] = []
+        if cover_identity_missing:
+            failed_passes.append("structural/cover_identity_missing")
 
         for item in parallel_results:
             if isinstance(item, Exception):
@@ -1062,7 +1587,43 @@ class ReportExtractor:
                 except Exception:
                     failed_passes.append(pass_name)
 
+        # A deterministic DOCX table inventory is the execution-count
+        # authority.  LLM output still supplies prose specifications and
+        # procedures, but cannot omit repeated sample/mode tables silently.
+        table_items, table_metrics = ReportExtractor._extract_docx_table_items(
+            file_bytes, results,
+        )
+        if table_items:
+            all_item_extractions = ReportExtractor._merge_docx_table_items(
+                all_item_extractions, table_items,
+            )
+            log.info("docx_execution_inventory_merged", **table_metrics)
+        table_instruments, instrument_table_metrics = (
+            ReportExtractor._extract_docx_instruments(file_bytes)
+        )
+        if table_instruments:
+            all_instruments = ReportExtractor._merge_docx_instruments(
+                all_instruments, table_instruments,
+            )
+            log.info(
+                "docx_instrument_inventory_merged", **instrument_table_metrics,
+            )
+
         # ── Code-level validation on per-item extractions ─────────────
+        source_sample_count, extracted_sample_count, missing_sample_count = (
+            ReportExtractor._item_sample_coverage_gap(raw_text, all_item_extractions)
+        )
+        if missing_sample_count:
+            failed_passes.append(
+                f"item/sample_coverage_missing:{missing_sample_count}"
+            )
+            log.warning(
+                "item_sample_coverage_incomplete",
+                source_sample_count=source_sample_count,
+                extracted_sample_count=extracted_sample_count,
+                missing_sample_count=missing_sample_count,
+            )
+
         code_issues = ReportExtractor._run_code_validation(all_item_extractions)
 
         # ── Convert item extractions to legacy data_rows for backward compat
@@ -1084,10 +1645,31 @@ class ReportExtractor:
         # Attach v3 fields
         data.item_extractions = all_item_extractions
         data.code_validation_issues = code_issues
+        data.failed_passes = failed_passes
+        data.extraction_quality = "partial" if failed_passes else "complete"
+        data.extraction_metrics = {
+            "text_length": len(raw_text),
+            "cover_fields": sum(1 for v in [cover.report_number, cover.sample_name, cover.client_name] if v),
+            "results_count": len(results),
+            "instruments_count": len(all_instruments),
+            "data_rows_count": len(all_data_rows),
+            "item_extractions": len(all_item_extractions),
+            "source_sample_count": source_sample_count,
+            "extracted_sample_count": extracted_sample_count,
+            "missing_sample_count": missing_sample_count,
+            **table_metrics,
+            **instrument_table_metrics,
+            "code_issues": len(code_issues),
+            "toc_entries": len(toc_items),
+            "failed_passes": failed_passes,
+            "p1_duration_ms": p1_dur,
+            "p2_parallel_ms": p2_dur,
+        }
 
         errors = validate_report(raw_text, data)
 
         total_dur = round((time.time() - t0) * 1000)
+        data.extraction_metrics["total_duration_ms"] = total_dur
         if errors:
             logger.warning("validation_warnings", errors=errors,
                           total_duration_ms=total_dur, p1_ms=p1_dur, p2_parallel_ms=p2_dur)

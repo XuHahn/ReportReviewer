@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { UploadResponse, ReportListResponse, ReportRecord, ReviewRule, EmcStandard, User, LoginResponse, UserListResponse, Tag, ProjectGroup, TimelineEntry, AnnotationResponse, StatsResponse } from './types'
+import type { ArchiveMemberInventory, EmcStandard, StandardKnowledgeChunk, StandardGraphClause, StandardGraphRequirement, StandardRequirementParameter, User, LoginResponse, UserListResponse, Tag, ProjectGroup, SetStatsResponse } from './types'
 import { logger } from './logger'
 
 // ── Token management ──────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY)
 }
 
-const api = axios.create({ baseURL: '/api' })
+const api = axios.create({ baseURL: '/api', timeout: 180000 })
 
 // Request interceptor: attach Bearer token
 api.interceptors.request.use((config) => {
@@ -55,124 +55,6 @@ api.interceptors.response.use(
   },
 )
 
-export async function uploadReport(
-  file: File,
-  tags?: string,
-  compareWith?: string,
-  onProgress?: (pct: number) => void,
-): Promise<UploadResponse> {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (tags) formData.append('tags', tags)
-  if (compareWith) formData.append('compare_with', compareWith)
-  const { data } = await api.post<UploadResponse>('/reports/upload', formData, {
-    timeout: 600000,
-    onUploadProgress: (e) => {
-      if (e.total && onProgress) {
-        onProgress(Math.round((e.loaded / e.total) * 100))
-      }
-    },
-  })
-  return data
-}
-
-// ── Shared SSE stream parser ────────────────────────────────────────────
-
-export type SSEEventCallback = (event: any) => void
-
-async function parseSSEStream(
-  response: Response,
-  onEvent: SSEEventCallback,
-): Promise<void> {
-  const reader = response.body!.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let currentEvent = ''
-  let currentData = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      if (line.startsWith('event: ')) {
-        currentEvent = line.slice(7).trim()
-      } else if (line.startsWith('data: ')) {
-        currentData = line.slice(6)
-      } else if (line === '') {
-        if (currentData) {
-          try {
-            const parsed = JSON.parse(currentData)
-            const eventType = currentEvent || parsed.type || 'unknown'
-            onEvent({ type: eventType, data: parsed.data || parsed })
-          } catch {
-            // skip malformed SSE line
-          }
-        }
-        currentEvent = ''
-        currentData = ''
-      }
-    }
-  }
-}
-
-const STREAM_TIMEOUT_MS = 600_000 // 10 minutes
-
-// ── SSE streaming upload ───────────────────────────────────────────────
-
-export async function uploadReportStream(
-  file: File,
-  tags: string | undefined,
-  compareWith: string | undefined,
-  onEvent: SSEEventCallback,
-  signal: AbortSignal,
-): Promise<void> {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (tags) formData.append('tags', tags)
-  if (compareWith) formData.append('compare_with', compareWith)
-
-  // Combine user cancel signal with a 10-minute timeout
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS)
-  const cleanup = () => clearTimeout(timeoutId)
-
-  signal.throwIfAborted()
-  signal.addEventListener('abort', () => controller.abort(), { once: true })
-  controller.signal.addEventListener('abort', cleanup, { once: true })
-
-  try {
-    const token = getStoredToken()
-    const response = await fetch('/api/reports/upload/stream', {
-      method: 'POST',
-      body: formData,
-      signal: controller.signal,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-
-    const reqId = response.headers.get('X-Request-Id')
-    if (reqId) logger.setReqId(reqId)
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        clearStoredToken()
-        window.dispatchEvent(new CustomEvent('auth:logout'))
-        throw new Error('登录已过期，请重新登录')
-      }
-      const err = await response.json().catch(() => ({ detail: 'Upload failed' }))
-      throw new Error(err.detail || '上传失败')
-    }
-
-    await parseSSEStream(response, onEvent)
-  } finally {
-    cleanup()
-  }
-}
-
 export interface HistoryParams {
   limit?: number
   offset?: number
@@ -182,157 +64,6 @@ export interface HistoryParams {
   date_to?: string
   employee_id?: string
   tag?: string
-}
-
-export async function getHistory(params: HistoryParams = {}): Promise<ReportListResponse> {
-  const { data } = await api.get<ReportListResponse>('/reports/history', { params })
-  return data
-}
-
-export async function getReportDetail(id: string): Promise<ReportRecord> {
-  const { data } = await api.get<ReportRecord>(`/reports/${id}`)
-  return data
-}
-
-// ── Full-text search ──────────────────────────────────────────────────
-
-export interface SearchParams {
-  q: string
-  limit?: number
-  offset?: number
-}
-
-export interface SearchSnippets {
-  location: string
-  original_text: string
-  error_description: string
-  standard_reference: string
-  suggestion: string
-}
-
-export interface SearchResultItem {
-  report_id: string
-  filename: string
-  overall_result: string
-  created_at: string
-  employee_id: string
-  uploader_name?: string
-  snippets: SearchSnippets
-  match_count: number
-  rank: number
-}
-
-export interface SearchResponse {
-  results: SearchResultItem[]
-  total: number
-  query: string
-}
-
-export async function searchReports(params: SearchParams): Promise<SearchResponse> {
-  const { data } = await api.get<SearchResponse>('/reports/search', { params })
-  return data
-}
-
-// ── Batch streaming upload ─────────────────────────────────────────────
-
-export async function uploadBatchStream(
-  files: File[],
-  tags: string | undefined,
-  compareWith: string | undefined,
-  onEvent: SSEEventCallback,
-  signal: AbortSignal,
-): Promise<void> {
-  const formData = new FormData()
-  for (const file of files) {
-    formData.append('files', file)
-  }
-  if (tags) formData.append('tags', tags)
-  if (compareWith) formData.append('compare_with', compareWith)
-
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS)
-  const cleanup = () => clearTimeout(timeoutId)
-
-  signal.throwIfAborted()
-  signal.addEventListener('abort', () => controller.abort(), { once: true })
-  controller.signal.addEventListener('abort', cleanup, { once: true })
-
-  try {
-    const token = getStoredToken()
-    const response = await fetch('/api/reports/upload/batch', {
-      method: 'POST',
-      body: formData,
-      signal: controller.signal,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-
-    const reqId = response.headers.get('X-Request-Id')
-    if (reqId) logger.setReqId(reqId)
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        clearStoredToken()
-        window.dispatchEvent(new CustomEvent('auth:logout'))
-        throw new Error('登录已过期，请重新登录')
-      }
-      const err = await response.json().catch(() => ({ detail: 'Batch upload failed' }))
-      throw new Error(err.detail || '批量上传失败')
-    }
-
-    await parseSSEStream(response, onEvent)
-  } finally {
-    cleanup()
-  }
-}
-
-export async function getStats(): Promise<StatsResponse> {
-  const { data } = await api.get('/reports/stats')
-  return data
-}
-
-export async function downloadExportPdf(id: string): Promise<void> {
-  const resp = await api.get(`/reports/${id}/export/pdf`, { responseType: 'blob' })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `report_${id}.pdf`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
-export async function downloadExportWord(id: string): Promise<void> {
-  const resp = await api.get(`/reports/${id}/export/word`, { responseType: 'blob' })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `report_${id}.docx`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
-// ── Review Rules API ──────────────────────────────────────────────────
-
-export async function getRules(params: { keyword?: string; category?: string } = {}): Promise<ReviewRule[]> {
-  const { data } = await api.get<ReviewRule[]>('/rules', { params })
-  return data
-}
-
-export async function createRule(rule: Partial<ReviewRule>): Promise<{ id: string }> {
-  const { data } = await api.post<{ id: string }>('/rules', rule)
-  return data
-}
-
-export async function updateRule(id: string, updates: Partial<ReviewRule>): Promise<{ updated: boolean }> {
-  const { data } = await api.put<{ updated: boolean }>(`/rules/${id}`, updates)
-  return data
-}
-
-export async function deleteRule(id: string): Promise<void> {
-  await api.delete(`/rules/${id}`)
 }
 
 // ── EMC Standards API ─────────────────────────────────────────────────
@@ -356,14 +87,116 @@ export async function deleteStandard(id: string): Promise<void> {
   await api.delete(`/standards/${id}`)
 }
 
-export async function deleteReport(id: string, cascade: boolean = false): Promise<{deleted: boolean; group_deleted?: boolean}> {
-  const { data } = await api.delete(`/reports/${id}`, { params: { cascade } })
+export async function uploadStandard(
+  file: File,
+  metadata: { code?: string; title?: string; organization?: string; category?: string; version?: string } = {},
+): Promise<{ id: string; duplicate: boolean; knowledge_status: string }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  Object.entries(metadata).forEach(([key, value]) => {
+    if (value) fd.append(key, value)
+  })
+  const { data } = await api.post('/standards/upload', fd, { timeout: 0 })
   return data
 }
 
-export async function getReportTimeline(id: string): Promise<{ entries: TimelineEntry[] }> {
-  const { data } = await api.get(`/reports/${id}/timeline`)
+export async function getStandardKnowledge(
+  id: string, query = '', limit = 50,
+): Promise<{ standard: EmcStandard; chunks: StandardKnowledgeChunk[]; total: number }> {
+  const { data } = await api.get(`/standards/${id}/knowledge`, { params: { query, limit } })
   return data
+}
+
+export async function retryStandardKnowledge(id: string): Promise<{ id: string; knowledge_status: string }> {
+  const { data } = await api.post(`/standards/${id}/knowledge/retry`)
+  return data
+}
+
+export async function rebuildStandardGraph(id: string): Promise<{ id: string; graph_status: string }> {
+  const { data } = await api.post(`/standards/${id}/graph/rebuild`)
+  return data
+}
+
+export async function retryFailedStandardGraphUnits(id: string): Promise<{ id: string; graph_status: string; remaining_failed_unit_ids: string[] }> {
+  const { data } = await api.post(`/standards/${id}/graph/retry-failed`)
+  return data
+}
+
+export async function getStandardGraph(id: string): Promise<{
+  standard: EmcStandard; clauses: StandardGraphClause[]; requirements: StandardGraphRequirement[]
+}> {
+  const { data } = await api.get(`/standards/${id}/graph`)
+  return data
+}
+
+export async function reviewStandardRequirement(
+  standardId: string,
+  requirementId: string,
+  body: {
+    review_status: 'confirmed' | 'rejected'; comment?: string
+    clause_number?: string; clause_title?: string; requirement_type?: string
+    test_item?: string; statement?: string; interpretation_zh?: string; applicability?: string
+    parameters?: StandardRequirementParameter[]
+  },
+): Promise<StandardGraphRequirement> {
+  const { data } = await api.patch(`/standards/${standardId}/graph/requirements/${requirementId}`, body)
+  return data
+}
+
+export async function publishStandardGraph(id: string): Promise<{
+  id: string; graph_status: string
+  counts: { release_id: string; release_number: number; embedding_model: string }
+}> {
+  const { data } = await api.post(`/standards/${id}/graph/publish`)
+  return data
+}
+
+export async function getStandardReleases(id: string): Promise<{
+  standard_id: string
+  releases: Array<{
+    id: string; release_number: number; status: string; source_file_sha256: string
+    embedding_model: string; prompt_version: string; requirement_count: number
+    published_by: string; published_at: string
+  }>
+}> {
+  const { data } = await api.get(`/standards/${id}/releases`)
+  return data
+}
+
+export async function getStandardRelease(standardId: string, releaseId: string): Promise<{
+  id: string; standard_id: string; release_number: number
+  snapshot: { requirements: StandardGraphRequirement[] }
+}> {
+  const { data } = await api.get(`/standards/${standardId}/releases/${releaseId}`)
+  return data
+}
+
+export async function saveStandardRequirementMapping(
+  standardId: string,
+  body: {
+    release_id: string; source_name: string; mapping_type: 'covered' | 'not_covered'
+    requirement_id?: string; scope_type: 'standard' | 'project' | 'set'
+    scope_value?: string; rationale?: string
+  },
+): Promise<{ id: string }> {
+  const { data } = await api.post(`/standards/${standardId}/mappings`, body)
+  return data
+}
+
+export async function downloadStandardFile(id: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await api.get(`/standards/${id}/file`, { responseType: 'blob' })
+  const disposition = response.headers['content-disposition'] || ''
+  let filename = `${id}.pdf`
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  const asciiMatch = disposition.match(/filename="?([^";]+)"?/i)
+  if (utf8Match?.[1]) filename = decodeURIComponent(utf8Match[1])
+  else if (asciiMatch?.[1]) filename = decodeURIComponent(asciiMatch[1])
+  return { blob: response.data, filename }
+}
+
+export async function previewStandardPdf(id: string): Promise<Blob> {
+  const response = await api.get(`/standards/${id}/preview`, { responseType: 'blob' })
+  return response.data
 }
 
 // ── Project Groups API ──────────────────────────────────────────
@@ -385,11 +218,6 @@ export async function updateProjectGroup(id: string, name?: string, description?
 
 export async function deleteProjectGroup(id: string): Promise<ProjectGroup> {
   const { data } = await api.delete(`/groups/${id}`)
-  return data
-}
-
-export async function updateReportTags(reportId: string, tags: string): Promise<{tags: string}> {
-  const { data } = await api.patch(`/reports/${reportId}/tags`, { tags })
   return data
 }
 
@@ -426,42 +254,6 @@ export async function updateUserName(employeeId: string, name: string): Promise<
   return data
 }
 
-
-export async function checkReportUpdates(reportId: string, since: string, by: string): Promise<{has_update: boolean, overall_result: string}> {
-  const { data } = await api.get(`/reports/${reportId}/check-updates`, { params: { since, by } })
-  return data
-}
-
-export async function updateItemAnnotation(
-  reportId: string,
-  itemIndex: number,
-  humanStatus: string,
-  humanComment?: string,
-  since?: string,
-): Promise<AnnotationResponse> {
-  const { data } = await api.patch(`/reports/${reportId}/items/${itemIndex}/annotation`, {
-    human_status: humanStatus,
-    human_comment: humanComment || '',
-    since: since || '',
-  })
-  return data
-}
-
-export async function downloadBatchExcel(ids: string[]): Promise<void> {
-  const resp = await api.get('/reports/export/batch', {
-    params: { ids: ids.join(',') },
-    responseType: 'blob',
-  })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `batch_export_${ids.length}.xlsx`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
 // ── Tags API ──────────────────────────────────────────────────────────
 
 export async function getTags(): Promise<Tag[]> {
@@ -481,4 +273,357 @@ export async function updateTag(id: string, name: string): Promise<{ updated: bo
 
 export async function deleteTag(id: string): Promise<void> {
   await api.delete(`/tags/${id}`)
+}
+
+// ── DocumentSet API ──
+
+import type { DocumentSetListItem, DocumentSetOverview, SetDocumentCreateRequest, PipelineReviewResult, PipelineIssue, VersionDiffItem, SetExtractionsResponse, DocumentExtractionResponse } from './types'
+
+export async function createDocumentSet(): Promise<{ set_id: string; status: string }> {
+  const { data } = await api.post('/sets'); return data
+}
+
+export async function listDocumentSets(): Promise<{ sets: DocumentSetListItem[]; total: number }> {
+  const { data } = await api.get('/sets'); return data
+}
+
+export async function getSetStats(): Promise<import('./types').SetStatsResponse> {
+  const { data } = await api.get('/sets/stats/overview'); return data
+}
+
+export async function getDocumentSet(setId: string): Promise<DocumentSetOverview> {
+  const { data } = await api.get(`/sets/${setId}`); return data
+}
+
+export async function startReviewRun(setId: string): Promise<{ set_id: string; run_id: string; status: string }> {
+  const { data } = await api.post(`/sets/${setId}/review-runs`)
+  return data
+}
+
+export async function listReviewRuns(setId: string): Promise<{
+  runs: import('./types').EvidenceGraphRunSummary[]; total: number
+}> {
+  const { data } = await api.get(`/sets/${setId}/review-runs`)
+  return data
+}
+
+export async function getReviewRun(
+  setId: string, runId: string,
+): Promise<import('./types').EvidenceGraphSnapshot> {
+  const { data } = await api.get(`/sets/${setId}/review-runs/${runId}`)
+  return data
+}
+
+export async function downloadReviewRunExport(
+  setId: string, runId: string, format: 'xlsx' | 'pdf' | 'evidence',
+): Promise<void> {
+  const response = await api.get(`/sets/${setId}/review-runs/${runId}/export`, {
+    params: { format }, responseType: 'blob', timeout: 180000,
+  })
+  const disposition = String(response.headers['content-disposition'] || '')
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1]
+  const filename = encoded ? decodeURIComponent(encoded) : `${setId}-review.${format === 'evidence' ? 'zip' : format}`
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+export async function decideReviewFinding(
+  setId: string, runId: string, findingId: string,
+  decision: 'confirmed' | 'dismissed' | 'advisory' | 'unresolved', comment: string,
+  resolutionCode = '', resolutionStatus = '',
+): Promise<void> {
+  await api.put(`/sets/${setId}/review-runs/${runId}/findings/${findingId}/decision`, {
+    decision, comment, resolution_code: resolutionCode, resolution_status: resolutionStatus,
+  })
+}
+
+export async function getSystemSettings(): Promise<{ settings: Record<string, string> }> {
+  const { data } = await api.get('/admin/settings')
+  return data
+}
+
+export async function updateSystemSettings(
+  settings: Record<string, string>,
+): Promise<{ settings: Record<string, string> }> {
+  const { data } = await api.put('/admin/settings', { settings })
+  return data
+}
+
+export async function getSystemLogs(params: {
+  source?: string; level?: string; reqId?: string; keyword?: string; limit?: number; offset?: number
+} = {}): Promise<{ logs: Array<Record<string, any>>; total: number }> {
+  const { data } = await api.get('/admin/logs/view', { params })
+  return data
+}
+
+export async function updateDocumentSetProjectGroup(
+  setId: string, projectGroupId: string,
+): Promise<{ set_id: string; project_group_id: string; project_group_name: string }> {
+  const { data } = await api.put(`/sets/${setId}/project-group`, { project_group_id: projectGroupId })
+  return data
+}
+
+export async function getDocumentSetStandards(setId: string): Promise<{
+  set_id: string; standards: EmcStandard[]; standard_review_enabled: boolean
+}> {
+  const { data } = await api.get(`/sets/${setId}/standards`); return data
+}
+
+export async function getDocumentSetStandardReferences(setId: string): Promise<{
+  set_id: string
+  references: Array<{ reference_code: string; normalized_code: string; sources: string[]; evidence: string[] }>
+  resolved: unknown[]
+  unresolved: unknown[]
+  skips: Array<{ normalized_code: string; reference_code: string; reason: string }>
+}> {
+  const { data } = await api.get(`/sets/${setId}/standard-references`); return data
+}
+
+export async function updateDocumentSetStandards(
+  setId: string, standardIds: string[],
+  skips: Array<{ normalized_code: string; reference_code: string; reason: string }> = [],
+): Promise<{
+  set_id: string; standards: EmcStandard[]; standard_review_enabled: boolean
+}> {
+  const { data } = await api.put(`/sets/${setId}/standards`, { standard_ids: standardIds, skips }); return data
+}
+
+export async function addDocumentToSet(setId: string, file: File, docType: string, replaceDocId?: string, signal?: AbortSignal): Promise<any> {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('doc_type', docType)
+  if (replaceDocId) fd.append('replace_doc_id', replaceDocId)
+  const { data } = await api.post(`/sets/${setId}/documents`, fd, { signal })
+  return data
+}
+
+export async function deleteDocument(setId: string, docId: string): Promise<{ deleted: boolean }> {
+  const { data } = await api.delete(`/sets/${setId}/documents/${docId}`)
+  return data
+}
+
+export async function lockDocumentSet(setId: string): Promise<{ set_id: string; status: string }> {
+  const { data } = await api.post(`/sets/${setId}/lock`); return data
+}
+
+export async function createDocumentSetRevision(setId: string): Promise<{ set_id: string; status: string }> {
+  const { data } = await api.post(`/sets/${setId}/revision`); return data
+}
+
+export async function triggerReview(setId: string): Promise<PipelineReviewResult> {
+  const startedAt = Date.now()
+  const started = await startReviewRun(setId)
+  while (true) {
+    const snapshot = await getReviewRun(setId, started.run_id)
+    if (['machine_complete', 'machine_incomplete', 'failed', 'aborted'].includes(snapshot.run.status)) {
+      const errors = snapshot.run.status === 'failed' ? ['证据图审核运行失败'] : []
+      const confirmedErrors = snapshot.findings.filter(item => item.status === 'confirmed_error')
+      const advisories = snapshot.findings.filter(item => item.status.includes('advisory'))
+      const unresolved = snapshot.findings.filter(item => item.status === 'unresolved')
+      return {
+        set_id: setId,
+        run_id: started.run_id,
+        status: snapshot.run.status,
+        is_clean: confirmedErrors.length === 0 && unresolved.length === 0 && !errors.length,
+        duration_seconds: (Date.now() - startedAt) / 1000,
+        issues: {
+          critical: confirmedErrors.length,
+          warning: unresolved.length,
+          info: advisories.length,
+        },
+        errors,
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 1200))
+  }
+}
+
+export async function streamReviewProgress(
+  setId: string,
+  onEvent: (event: Record<string, any>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const labels: Record<string, string> = {
+    created: '审核任务已创建', building: '构建证据图', running: '核验文档关系',
+    machine_complete: '审核完成', machine_incomplete: '审核完成，存在待确认项',
+    failed: '审核失败', aborted: '审核已取消',
+  }
+  while (!signal?.aborted) {
+    const { runs } = await listReviewRuns(setId)
+    const run = runs[0]
+    if (run) {
+      const terminal = ['machine_complete', 'machine_incomplete', 'failed', 'aborted'].includes(run.status)
+      onEvent({
+        step: terminal ? 3 : run.status === 'created' ? 1 : 2,
+        total: 3,
+        label: labels[run.status] || '证据图审核运行中',
+        status: terminal ? (run.status === 'failed' ? 'error' : 'complete') : 'active',
+      })
+      if (terminal) return
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+}
+
+export async function getPipelineIssues(setId: string): Promise<{ issues: PipelineIssue[]; total: number }> {
+  const { runs } = await listReviewRuns(setId)
+  if (!runs.length) return { issues: [], total: 0 }
+  const snapshot = await getReviewRun(setId, runs[0].graph_id)
+  const evidence = new Map(snapshot.evidence.map(item => [item.evidence_id, item]))
+  const decisions = new Map(snapshot.decisions.map(item => [item.finding_id, item]))
+  const issues: PipelineIssue[] = snapshot.findings
+    .filter(item => item.status !== 'confirmed_pass' && item.status !== 'not_applicable')
+    .map(item => {
+      const decision = decisions.get(item.finding_id)
+      const sources = Object.fromEntries(item.evidence_ids.map((id, index) => {
+        const source = evidence.get(id)
+        return [`evidence_${index + 1}`, source?.exact_quote || id]
+      }))
+      return {
+        id: item.finding_id,
+        severity: item.severity === 'error' ? 'CRITICAL' : item.severity === 'warning' ? 'WARNING' : 'INFO',
+        category: item.check_id,
+        field_name: item.title,
+        description: item.description,
+        sources,
+        source_step: 'evidence_graph',
+        validation_type: item.status,
+        resolution: '',
+        human_status: decision?.decision === 'confirmed' ? 'confirmed'
+          : decision?.decision === 'dismissed' ? 'ignored' : 'pending',
+        human_comment: decision?.comment || '',
+        annotated_by: decision?.actor_id || '',
+        annotated_at: decision?.created_at || '',
+        check_id: item.check_id,
+      }
+    })
+  return { issues, total: issues.length }
+}
+
+export async function getPipelineMetrics(setId: string, runId?: string): Promise<import('./types').PipelineMetricsResponse> {
+  return { set_id: setId, run_id: runId || '', metrics: [], summary: {} }
+}
+
+
+export async function downloadAuditReportExcel(setId: string): Promise<{ blob: Blob; filename: string }> {
+  const { runs } = await listReviewRuns(setId)
+  if (!runs.length) throw new Error('当前任务还没有可导出的审核运行')
+  const response = await api.get(`/sets/${setId}/review-runs/${runs[0].graph_id}/export`, {
+    params: { format: 'xlsx' }, responseType: 'blob',
+  })
+  const disposition = response.headers['content-disposition'] || ''
+  let filename = `${setId}_审核报告.xlsx`
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  const asciiMatch = disposition.match(/filename="?([^";]+)"?/i)
+  if (utf8Match?.[1]) {
+    filename = decodeURIComponent(utf8Match[1])
+  } else if (asciiMatch?.[1]) {
+    filename = decodeURIComponent(asciiMatch[1])
+  }
+  return { blob: response.data, filename }
+}
+
+export async function annotateIssue(setId: string, issueId: string, humanStatus: string, humanComment?: string): Promise<any> {
+  const { runs } = await listReviewRuns(setId)
+  if (!runs.length) throw new Error('当前任务还没有审核运行')
+  const decision = humanStatus === 'confirmed' ? 'confirmed'
+    : humanStatus === 'ignored' ? 'dismissed' : 'unresolved'
+  await decideReviewFinding(
+    setId, runs[0].graph_id, issueId, decision,
+    humanComment || (decision === 'confirmed' ? '人工确认问题' : decision === 'dismissed' ? '人工排除问题' : ''),
+  )
+  return { updated: true }
+}
+
+export async function getVersionHistory(setId: string, docType: string): Promise<{ versions: any[]; total: number }> {
+  const { data } = await api.get(`/sets/${setId}/versions/${docType}`); return data
+}
+
+export async function diffVersions(setId: string, oldDocId: string, newDocId: string): Promise<{ diffs: VersionDiffItem[]; changed: VersionDiffItem[] }> {
+  const { data } = await api.get(`/sets/${setId}/diff`, { params: { old_doc_id: oldDocId, new_doc_id: newDocId } }); return data
+}
+
+export async function getExtractions(setId: string): Promise<SetExtractionsResponse> {
+  const { data } = await api.get(`/sets/${setId}/extractions`); return data
+}
+
+/** Get extraction data for a single document (decoupled from other docs' states). */
+export async function getDocumentExtraction(setId: string, docId: string): Promise<DocumentExtractionResponse> {
+  const { data } = await api.get(`/sets/${setId}/documents/${docId}/extraction`); return data
+}
+
+export async function saveOverrides(setId: string, docId: string, overrides: Record<string, string>): Promise<{ saved: number }> {
+  const { data } = await api.patch(`/sets/${setId}/documents/${docId}/overrides`, { overrides }); return data
+}
+
+export async function confirmDocumentReview(
+  setId: string, docId: string,
+): Promise<{ doc_id: string; reviewed_by: string; reviewed_at: string }> {
+  const { data } = await api.post(`/sets/${setId}/documents/${docId}/review-confirmation`)
+  return data
+}
+
+export async function getOverrides(setId: string, docId: string): Promise<{ overrides: Record<string, string>; count: number }> {
+  const { data } = await api.get(`/sets/${setId}/documents/${docId}/overrides`); return data
+}
+
+export async function retryExtraction(setId: string, docId: string): Promise<{ doc_id: string; status: string; message: string }> {
+  const { data } = await api.post(`/sets/${setId}/documents/${docId}/retry-extraction`); return data
+}
+
+export async function cancelExtraction(setId: string, docId: string): Promise<{ cancelled: boolean; doc_id: string; message: string }> {
+  const { data } = await api.post(`/sets/${setId}/documents/${docId}/cancel-extraction`); return data
+}
+
+/** Return a same-origin resource path. Authentication is sent as a header. */
+export function getDocumentFileUrl(setId: string, docId: string): string {
+  return `/api/sets/${setId}/documents/${docId}/file`
+}
+
+/** Open one source file inside an uploaded raw-record ZIP. */
+export function getArchiveMemberFileUrl(setId: string, docId: string, memberIndex: number): string {
+  return `/api/sets/${setId}/documents/${docId}/archive-members/${memberIndex}/file`
+}
+
+/** Render one evidence source page as a highlighted PNG. */
+export function getEvidencePagePreviewUrl(setId: string, graphId: string, evidenceId: string): string {
+  // This version bypasses preview images cached before normalized highlighting
+  // was introduced. The endpoint is no-store, so later renderer changes do not
+  // require another cache migration.
+  return `/api/sets/${setId}/review-runs/${graphId}/evidence/${evidenceId}/preview?renderer=normalized-quote-v2`
+}
+
+export async function fetchAuthenticatedBlob(url: string): Promise<Blob> {
+  const response = await api.get(url.startsWith('/api/') ? url.slice(4) : url, { responseType: 'blob' })
+  return response.data
+}
+
+export async function openAuthenticatedResource(url: string): Promise<void> {
+  const popup = window.open('', '_blank')
+  try {
+    const objectUrl = URL.createObjectURL(await fetchAuthenticatedBlob(url))
+    if (popup) popup.location.href = objectUrl
+    else {
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.target = '_blank'
+      link.rel = 'noreferrer'
+      link.click()
+    }
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+  } catch (error) {
+    popup?.close()
+    throw error
+  }
+}
+
+export async function getArchiveMemberInventory(setId: string, docId: string): Promise<ArchiveMemberInventory> {
+  const { data } = await api.get(`/sets/${setId}/documents/${docId}/archive-members`)
+  return data
 }

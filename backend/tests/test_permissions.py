@@ -1,21 +1,11 @@
 """Role-based permission boundary tests."""
 
-import pytest
-from tests.utils import make_rule_payload
-
+from auth import create_access_token
 
 class TestViewerRestrictions:
 
-    async def test_viewer_cannot_upload(self, viewer_client):
-        res = await viewer_client.post(
-            "/api/reports/upload",
-            files={"file": ("test.pdf", b"dummy", "application/pdf")},
-            data={"tags": ""},
-        )
-        assert res.status_code == 403, f"Expected 403, got {res.status_code}"
-
-    async def test_viewer_cannot_create_rule(self, viewer_client):
-        res = await viewer_client.post("/api/rules", json=make_rule_payload())
+    async def test_viewer_cannot_create_tag(self, viewer_client):
+        res = await viewer_client.post("/api/tags", json={"name": "viewer-tag"})
         assert res.status_code == 403
 
     async def test_viewer_cannot_create_users(self, viewer_client):
@@ -26,11 +16,13 @@ class TestViewerRestrictions:
         res = await viewer_client.put("/api/admin/settings", json={"settings": {}})
         assert res.status_code in (403, 404)
 
-    async def test_viewer_can_read_own_reports(self, viewer_client):
-        res = await viewer_client.get("/api/reports/history?limit=10")
+    async def test_viewer_can_read_own_tasks(self, viewer_client):
+        res = await viewer_client.get("/api/sets")
         assert res.status_code == 200
 
-
+    async def test_viewer_cannot_list_all_users_or_audit_logs(self, viewer_client):
+        assert (await viewer_client.get("/api/users")).status_code == 403
+        assert (await viewer_client.get("/api/logs")).status_code == 403
 class TestReviewerRestrictions:
 
     async def test_reviewer_cannot_create_users(self, reviewer_client):
@@ -41,16 +33,16 @@ class TestReviewerRestrictions:
         res = await reviewer_client.put("/api/admin/settings", json={"settings": {}})
         assert res.status_code in (403, 404)
 
-    async def test_reviewer_can_access_rules_endpoint(self, reviewer_client):
-        """Reviewer can access rule creation (positive permission check)."""
-        res = await reviewer_client.get("/api/rules")
+    async def test_reviewer_can_access_tags_endpoint(self, reviewer_client):
+        res = await reviewer_client.get("/api/tags")
         assert res.status_code == 200
 
-    async def test_reviewer_can_create_rules(self, reviewer_client):
-        res = await reviewer_client.post("/api/rules", json=make_rule_payload(name="ReviewerRule"))
+    async def test_reviewer_can_create_tags(self, reviewer_client):
+        res = await reviewer_client.post("/api/tags", json={"name": "reviewer-tag"})
         assert res.status_code == 200, f"Expected 200, got {res.status_code}: {res.text}"
 
-
+    async def test_reviewer_cannot_read_audit_logs(self, reviewer_client):
+        assert (await reviewer_client.get("/api/logs")).status_code == 403
 class TestAdminAccess:
 
     async def test_admin_can_manage_users(self, admin_client):
@@ -67,16 +59,28 @@ class TestAdminAccess:
     async def test_admin_can_view_stats(self, admin_client):
         res = await admin_client.get("/api/admin/stats")
         assert res.status_code == 200
-        assert "overview" in res.json()
+        assert "total_sets" in res.json()
 
+    async def test_admin_can_read_audit_logs(self, admin_client):
+        assert (await admin_client.get("/api/logs")).status_code == 200
 
+    async def test_admin_cannot_create_unknown_role(self, admin_client):
+        response = await admin_client.post(
+            "/api/users", json={"employee_id": "BADROLE", "role": "superuser"},
+        )
+        assert response.status_code == 422
 class TestUnauthenticated:
 
     async def test_no_token_returns_401(self, client):
-        res = await client.get("/api/reports/history")
+        res = await client.get("/api/sets")
         assert res.status_code == 401
 
     async def test_invalid_token_returns_401(self, client):
         client.headers["Authorization"] = "Bearer invalid.token.here"
-        res = await client.get("/api/reports/history")
+        res = await client.get("/api/sets")
+        assert res.status_code == 401
+
+    async def test_access_token_in_query_string_is_rejected(self, client, _seeded_db):
+        token = create_access_token("reviewer1", "reviewer")
+        res = await client.get("/api/sets", params={"token": token})
         assert res.status_code == 401

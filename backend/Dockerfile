@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Chromium for PDF export
+# Chromium is used for PDF export. Scanned pages use the configured Qwen vision service.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         chromium \

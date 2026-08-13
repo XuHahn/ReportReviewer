@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>结果冲突证据结构化展示</title>
+  <style>
+    :root{--ink:#253247;--muted:#6d7a8e;--line:#dbe3e8;--canvas:#edf1f3;--paper:#fff;--green:#14735f;--green-soft:#edf8f4;--red:#b93f39;--red-soft:#fff2f1;--amber:#98620d;--amber-soft:#fff8e9;--blue-soft:#eef4f8}
+    *{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}button{font:inherit}
+    .page{min-height:100vh;padding:30px;background:linear-gradient(90deg,rgba(37,50,71,.035) 1px,transparent 1px) 0 0/48px 48px,var(--canvas)}
+    .shell{max-width:1500px;margin:auto;overflow:hidden;border:1px solid #d4dde3;border-radius:16px;background:var(--paper);box-shadow:0 16px 44px rgba(38,53,68,.09)}
+    .top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:15px;align-items:start;padding:24px 27px 21px;border-bottom:1px solid var(--line)}
+    .bang{width:43px;height:43px;display:grid;place-items:center;border-radius:50%;background:var(--red-soft);color:var(--red);font:850 24px/1 "Avenir Next",sans-serif}
+    .eyebrow{display:inline-flex;padding:3px 9px;border-radius:999px;background:var(--red-soft);color:var(--red);font-size:11px;font-weight:800}
+    h1{margin:7px 0 0;font-size:23px;line-height:1.4;letter-spacing:-.01em}.lead{margin:7px 0 0;color:#536277;font-size:14px;line-height:1.65}.count{color:#8a96a5;font:12px/1.4 "Avenir Next",monospace}
+    .body{padding:21px 27px 26px}.modebar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.modebar h2{margin:0;font-size:16px}.modebar p{margin:5px 0 0;color:var(--muted);font-size:11px}
+    .tabs{display:flex;padding:3px;border:1px solid var(--line);border-radius:8px;background:#f3f6f8}.tabs button{padding:7px 12px;border:0;border-radius:6px;background:transparent;color:#6b7889;font-size:11px;cursor:pointer}.tabs button.active{background:#fff;color:var(--ink);font-weight:750;box-shadow:0 1px 4px rgba(35,48,68,.12)}
+    .verdict-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 15px;border:1px solid #efc7c3;border-radius:10px 10px 0 0;background:var(--red-soft)}.verdict-banner b{color:#8f2d29;font-size:14px}.verdict-banner span{color:#7c5d61;font-size:11px}
+    .comparison{overflow:hidden;border:1px solid var(--line);border-top:0;border-radius:0 0 10px 10px}.comparison-head,.record{display:grid;grid-template-columns:128px minmax(215px,1.05fr) 105px 105px 105px 125px minmax(220px,1fr);align-items:stretch}
+    .comparison-head{background:#f1f4f6;color:#778396;font-size:10px;font-weight:700}.comparison-head div{padding:9px 11px;border-right:1px solid var(--line)}.comparison-head div:last-child{border-right:0}
+    .record{position:relative;min-height:88px;border-top:1px solid var(--line);background:#fff}.record>div{min-width:0;padding:12px 11px;border-right:1px solid #e5eaee;font-size:12px;line-height:1.55}.record>div:last-child{border-right:0}.record.good{background:linear-gradient(90deg,var(--green-soft),#fff 41%)}.record.bad{background:linear-gradient(90deg,var(--red-soft),#fff 41%)}
+    .source{display:flex;flex-direction:column;justify-content:center;gap:4px;border-left:5px solid var(--green)}.bad .source{border-left-color:var(--red)}.source small{color:#7a8798;font-size:9px}.source b{font-size:12px}.source .loc{color:#607083;font-size:9px}
+    .identity b{display:block;font-size:12px}.identity span{display:block;margin-top:4px;color:#69778a;font-size:10px}.cell{display:flex;align-items:center;color:#3d4e62}.result{display:flex;align-items:center;justify-content:center}
+    .pill{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:6px;background:#e1f2ec;color:var(--green);font-weight:800;white-space:nowrap}.pill.fail{background:#ffe0dd;color:var(--red)}
+    .reading{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(310px,.88fr);gap:12px;margin-top:13px}.explain,.next{padding:14px 15px;border-radius:9px}.explain{border:1px solid #dbe3e8;background:var(--blue-soft)}.next{border:1px solid #ead7b1;background:var(--amber-soft)}.explain h3,.next h3{margin:0 0 6px;font-size:12px}.explain p,.next p{margin:0;color:#5b697b;font-size:11px;line-height:1.7}.explain b{color:var(--red)}
+    .trace{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.trace span{padding:4px 7px;border-radius:5px;background:#fff;color:#51677b;font-size:9px}
+    .actions{display:flex;align-items:center;gap:7px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.actions button{min-height:36px;padding:0 12px;border:1px solid #cbd5dc;border-radius:7px;background:#fff;color:#39536a;font-size:10px;font-weight:700}.actions .primary{border-color:var(--green);background:var(--green);color:#fff}.actions .technical{margin-left:auto;border-color:transparent;color:#798596}
+    .raw-view{display:none;grid-template-columns:1fr 1fr;gap:10px}.raw-view.visible{display:grid}.structured.hidden{display:none}.raw-card{min-width:0;padding:14px;border:1px solid var(--line);border-radius:9px;background:#f7f9fb}.raw-card header{display:flex;justify-content:space-between;gap:10px}.raw-card header b{font-size:12px}.raw-card header span{color:#778497;font-size:10px}.raw-card pre{max-height:440px;overflow:auto;margin:11px 0 0;padding:12px;border-left:3px solid var(--green);background:#fff;color:#46576a;font:10px/1.65 "SFMono-Regular",Consolas,monospace;white-space:pre-wrap}.raw-card.conflict pre{border-left-color:var(--red)}.raw-card mark{padding:2px 4px;border-radius:3px;background:#ffd8d5;color:#9d2f2a;font-weight:800}
+    @media(max-width:1100px){.page{padding:12px}.comparison{overflow:auto}.comparison-head,.record{min-width:1060px}.reading,.raw-view.visible{grid-template-columns:1fr}.count{display:none}}
+  </style>
+</head>
+<body>
+  <main class="page"><section class="shell">
+    <header class="top"><div class="bang">!</div><div><span class="eyebrow">报告内部结果冲突</span><h1>反向电压：同一样品、同一模式出现“通过”和“不通过”</h1><p class="lead">不是“符合”和“Pass”翻译不同；检测报告第 57 页本身记录了两个相反结果。</p></div><div class="count">问题 23 / 34</div></header>
+    <div class="body">
+      <div class="modebar"><div><h2>系统实际比较了什么</h2><p>默认只展示参与判断的字段；需要复核时再展开完整原文。</p></div><div class="tabs" role="tablist"><button id="structuredTab" class="active">结构化对比</button><button id="rawTab">完整原文</button></div></div>
+      <section class="structured" id="structuredView">
+        <div class="verdict-banner"><b>检测报告有两条 Mode 2 记录，结果互相冲突</b><span>先解决报告内部冲突，再与原始记录比较</span></div>
+        <div class="comparison">
+          <div class="comparison-head"><div>资料 / 位置</div><div>测试身份</div><div>电压</div><div>时长</div><div>要求等级</div><div>实际等级</div><div>原文结果</div></div>
+          <div class="record good"><div class="source"><small>原始记录</small><b>记录 1</b><span class="loc">ZIP 第 19 份 · 第 1 页</span></div><div class="identity"><b>反向电压</b><span>样品 0016 · Mode 2</span></div><div class="cell">14V</div><div class="cell">60s</div><div class="cell">C</div><div class="cell">C¹⁾</div><div class="result"><span class="pill">✓ 符合</span></div></div>
+          <div class="record good"><div class="source"><small>检测报告</small><b>报告记录 1</b><span class="loc">第 57 页 · 第一处</span></div><div class="identity"><b>Reversed voltage</b><span>样品 0016 · Mode 2</span></div><div class="cell">14V</div><div class="cell">60s</div><div class="cell">C</div><div class="cell">C¹⁾</div><div class="result"><span class="pill">✓ Pass</span></div></div>
+          <div class="record bad"><div class="source"><small>检测报告</small><b>报告记录 2</b><span class="loc">第 57 页 · 第二处</span></div><div class="identity"><b>Reversed voltage</b><span>样品 0016 · Mode 2</span></div><div class="cell">14V</div><div class="cell">60s</div><div class="cell">A</div><div class="cell">C¹⁾</div><div class="result"><span class="pill fail">! 不 Pass</span></div></div>
+        </div>
+        <div class="reading">
+          <div class="explain"><h3>为什么判定报告内部冲突</h3><p>报告记录 1 与报告记录 2 的测试项目、样品、模式、电压和时长相同，但结果分别为“Pass”和“<b>不 Pass</b>”。原始记录的“符合”与报告记录 1 的“Pass”含义一致。</p><div class="trace"><span>样品 E202508277046-0016</span><span>Mode 2</span><span>14V</span><span>60s</span><span>报告第 57 页</span></div></div>
+          <div class="next"><h3>建议怎么处理</h3><p>核对报告第 57 页第二条记录的“要求等级 A”和“结果 不Pass”是否误填，并同步确认报告汇总表中的 Fail。</p></div>
+        </div>
+      </section>
+      <section class="raw-view" id="rawView">
+        <article class="raw-card"><header><b>原始记录 · 记录 1</b><span>member-19 / 第 1 页</span></header><pre>反向电压
+电源线
+反向电压：14V
+60s
+C
+C¹⁾
+符合</pre></article>
+        <article class="raw-card conflict"><header><b>检测报告 · 第 57 页</b><span>包含两条 Mode 2 记录</span></header><pre>样品：E202508277046-0016　Mode 2
+Reversed voltage　14V　60s　C　C¹⁾　Pass
+
+样品：E202508277046-0016　Mode 2
+Reversed voltage　14V　60s　A　C¹⁾　<mark>不 Pass</mark>
+
+说明：这里只保留与判断有关的上下文。
+点击“打开原文件”可查看第 57 页完整内容。</pre></article>
+      </section>
+      <footer class="actions"><button class="primary">要求修改检测报告</button><button>原始记录需要核对</button><button>暂缓处理</button><button class="technical">技术信息</button></footer>
+    </div>
+  </section></main>
+  <script>
+    const structuredTab=document.getElementById('structuredTab'),rawTab=document.getElementById('rawTab'),structuredView=document.getElementById('structuredView'),rawView=document.getElementById('rawView');
+    function showRaw(raw){structuredTab.classList.toggle('active',!raw);rawTab.classList.toggle('active',raw);structuredView.classList.toggle('hidden',raw);rawView.classList.toggle('visible',raw)}
+    structuredTab.addEventListener('click',()=>showRaw(false));rawTab.addEventListener('click',()=>showRaw(true));
+  </script>
+</body>
+</html>

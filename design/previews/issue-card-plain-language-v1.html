@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>问题卡片易读溯源版原型</title>
+  <style>
+    :root {
+      --ink: #233044;
+      --muted: #66758a;
+      --line: #dce3e8;
+      --canvas: #eef2f4;
+      --paper: #ffffff;
+      --green: #126e5b;
+      --green-soft: #eef8f4;
+      --red: #bf433d;
+      --red-soft: #fff3f2;
+      --amber: #9b640f;
+      --amber-soft: #fff8e9;
+      --blue-soft: #f1f5f8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 44px 56px;
+      background:
+        linear-gradient(90deg, rgba(35,48,68,.035) 1px, transparent 1px) 0 0 / 48px 48px,
+        var(--canvas);
+    }
+
+    .context {
+      max-width: 1500px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #738194;
+      font-size: 14px;
+    }
+
+    .context strong { color: #344257; font-size: 16px; }
+
+    .card {
+      position: relative;
+      max-width: 1500px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid #d6dde3;
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: 0 16px 40px rgba(37, 52, 67, .08);
+    }
+
+    .review-mark {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 7px;
+      background: var(--red);
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      padding: 30px 34px 26px 40px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .alert-icon {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--red-soft);
+      color: var(--red);
+      font: 800 26px/1 "Avenir Next", sans-serif;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 8px;
+      color: var(--red);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .eyebrow span {
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--red-soft);
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 980px;
+      font-size: 28px;
+      line-height: 1.35;
+      letter-spacing: -.02em;
+    }
+
+    .lead {
+      margin: 10px 0 0;
+      color: #526176;
+      font-size: 17px;
+      line-height: 1.7;
+    }
+
+    .impact {
+      min-width: 176px;
+      padding: 12px 14px;
+      border: 1px solid #f0cfcb;
+      border-radius: 10px;
+      background: #fffafa;
+    }
+
+    .impact small, .impact strong { display: block; }
+    .impact small { color: #8a6670; font-size: 12px; }
+    .impact strong { margin-top: 5px; color: #9f302b; font-size: 15px; }
+
+    .body { padding: 28px 34px 30px 40px; }
+
+    .section-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .section-title h2 { margin: 0; font-size: 18px; }
+    .section-title p { margin: 0; color: var(--muted); font-size: 13px; }
+
+    .evidence-path {
+      display: grid;
+      grid-template-columns: minmax(0, 1.18fr) 40px minmax(0, 1fr) 40px minmax(0, 1fr);
+      align-items: stretch;
+    }
+
+    .path-arrow {
+      display: grid;
+      place-items: center;
+      color: #98a5b3;
+      font-size: 23px;
+    }
+
+    .source-card {
+      min-height: 190px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-top-width: 4px;
+      border-radius: 11px;
+      background: #fbfcfd;
+    }
+
+    .source-card.found { border-top-color: var(--green); background: var(--green-soft); }
+    .source-card.missing { border-top-color: var(--red); background: var(--red-soft); }
+    .source-type { color: #758296; font-size: 13px; }
+    .source-file {
+      margin-top: 13px;
+      padding: 8px 10px;
+      overflow: hidden;
+      border: 1px solid rgba(78, 98, 112, .12);
+      border-radius: 7px;
+      background: rgba(255,255,255,.72);
+      color: #506174;
+      font-size: 12px;
+      line-height: 1.45;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .source-status { margin-top: 5px; font-size: 20px; font-weight: 750; }
+    .source-card.found .source-status { color: var(--green); }
+    .source-card.missing .source-status { color: var(--red); }
+
+    .requirement-name { margin-top: 18px; font-size: 18px; font-weight: 750; }
+
+    .facts {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 11px;
+    }
+
+    .facts span {
+      padding: 5px 9px;
+      border-radius: 6px;
+      background: rgba(255,255,255,.75);
+      color: #3d5260;
+      font: 650 13px/1.2 "Avenir Next", "PingFang SC", sans-serif;
+    }
+
+    .source-note {
+      margin: 16px 0 0;
+      color: #617084;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .missing-symbol {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      margin-top: 18px;
+      border: 1px dashed #d58984;
+      border-radius: 8px;
+      color: var(--red);
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .lower {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(380px, .92fr);
+      gap: 18px;
+      margin-top: 22px;
+    }
+
+    .explain, .next-step {
+      padding: 22px 24px;
+      border-radius: 12px;
+    }
+
+    .explain { border: 1px solid #dde4e9; background: var(--blue-soft); }
+    .next-step { border: 1px solid #ead7b2; background: var(--amber-soft); }
+    .explain h3, .next-step h3 { margin: 0 0 13px; font-size: 17px; }
+    .explain p { margin: 0; color: #526176; font-size: 14px; line-height: 1.8; }
+    .explain strong { color: var(--ink); }
+
+    .steps { display: grid; gap: 10px; }
+    .step { display: grid; grid-template-columns: 26px 1fr; gap: 10px; color: #5d513b; font-size: 14px; line-height: 1.55; }
+    .step b {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #f1d79f;
+      color: #694507;
+      font: 750 12px/1 "Avenir Next", sans-serif;
+    }
+
+    .trace-panel {
+      margin-top: 20px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .trace-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafb;
+    }
+
+    .trace-head h3 { margin: 0; font-size: 17px; }
+    .trace-head span { color: #718094; font-size: 12px; }
+    .trace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
+    .trace-column { min-width: 0; padding: 20px; }
+    .trace-column + .trace-column { border-left: 1px solid var(--line); }
+    .trace-label { margin-bottom: 10px; color: #758296; font-size: 12px; font-weight: 650; }
+    .file-location { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    .file-location strong { display: block; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+    .file-location span { display: block; margin-top: 3px; color: #6c7a8e; font-size: 12px; }
+    .open-link { flex: 0 0 auto; min-height: 32px; padding: 0 10px; color: var(--green); font-size: 12px; }
+
+    blockquote {
+      margin: 14px 0 0;
+      padding: 13px 15px;
+      border-left: 4px solid var(--green);
+      background: var(--green-soft);
+      color: #314557;
+      font-size: 14px;
+      font-weight: 650;
+      line-height: 1.7;
+    }
+
+    .search-scope { display: grid; gap: 12px; }
+    .search-row { padding: 13px 14px; border: 1px solid #e1e6ea; border-radius: 9px; background: #fbfcfd; }
+    .search-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .search-row-head strong { font-size: 14px; }
+    .search-row-head span { color: var(--red); font-size: 12px; font-weight: 700; }
+    .search-file { margin-top: 7px; overflow-wrap: anywhere; color: #5c6b7f; font-size: 12px; line-height: 1.5; }
+    .search-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+    .search-stats b { padding: 4px 7px; border-radius: 5px; background: #eef2f5; color: #4d5d70; font-size: 11px; }
+    .file-samples { margin-top: 10px; padding-top: 9px; border-top: 1px dashed #dce2e7; color: #748195; font-size: 11px; line-height: 1.7; }
+    .file-list-button { min-height: 32px; margin-top: 9px; padding: 0 10px; color: #345c78; font-size: 12px; }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 20px 34px 22px 40px;
+      background: #fafbfc;
+    }
+
+    button {
+      min-height: 42px;
+      padding: 0 17px;
+      border: 1px solid #cbd5dd;
+      border-radius: 8px;
+      background: #fff;
+      color: #344a60;
+      font: 650 14px/1 "PingFang SC", system-ui, sans-serif;
+    }
+
+    button.primary { border-color: var(--green); background: var(--green); color: #fff; }
+    button.quiet { margin-left: auto; border-color: transparent; background: transparent; color: #758295; }
+
+    .technical {
+      padding: 0 34px 20px 40px;
+      background: #fafbfc;
+      color: #929dad;
+      font: 12px/1.4 "Avenir Next", monospace;
+    }
+
+    @media (max-width: 900px) {
+      .page { padding: 18px; }
+      .header { grid-template-columns: auto 1fr; }
+      .impact { grid-column: 2; }
+      .evidence-path { grid-template-columns: 1fr; gap: 9px; }
+      .path-arrow { transform: rotate(90deg); }
+      .lower { grid-template-columns: 1fr; }
+      .trace-grid { grid-template-columns: 1fr; }
+      .trace-column + .trace-column { border-top: 1px solid var(--line); border-left: 0; }
+      .footer { align-items: stretch; flex-direction: column; }
+      button.quiet { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="context">
+      <strong>审核问题 · 易读溯源版原型</strong>
+      <span>问题 03 / 25</span>
+    </div>
+
+    <article class="card">
+      <div class="review-mark"></div>
+      <header class="header">
+        <div class="alert-icon">!</div>
+        <div>
+          <div class="eyebrow"><span>需要补资料</span> 计划项目没有形成完整记录</div>
+          <h1>高温存储：计划要求做，但资料中没有找到测试结果</h1>
+          <p class="lead">试验计划列出了“高温存储”，目前上传的原始记录和检测报告中都没有找到对应项目。</p>
+        </div>
+        <div class="impact">
+          <small>可能影响</small>
+          <strong>报告项目不完整</strong>
+        </div>
+      </header>
+
+      <div class="body">
+        <div class="section-title">
+          <h2>系统找到了什么</h2>
+          <p>按测试项目、常用名称和文档位置逐项核对</p>
+        </div>
+
+        <section class="evidence-path" aria-label="计划到报告的资料路径">
+          <div class="source-card found">
+            <div class="source-type">试验计划</div>
+            <div class="source-status">✓ 明确要求测试</div>
+            <div class="source-file">ITW-平台执行器用280电机试验大纲251014Rev1.xlsx</div>
+            <div class="requirement-name">高温存储</div>
+            <div class="facts"><span>85℃</span><span>48 h</span><span>ISO 16750-4</span></div>
+            <p class="source-note">工作表“试验项目” · 第 3 页</p>
+          </div>
+          <div class="path-arrow">→</div>
+          <div class="source-card missing">
+            <div class="source-type">原始记录</div>
+            <div class="source-status">未找到</div>
+            <div class="source-file">test_set_04-rd20-original-records.zip</div>
+            <div class="facts"><span>已检查 54 个 PDF</span><span>匹配 0 个</span></div>
+            <p class="source-note">所有文件中均未找到“高温存储”或已确认的同义名称。</p>
+          </div>
+          <div class="path-arrow">→</div>
+          <div class="source-card missing">
+            <div class="source-type">检测报告</div>
+            <div class="source-status">未找到</div>
+            <div class="source-file">报告书_E202508277046-1EN(RD20).docx</div>
+            <div class="facts"><span>已检查 84 页</span><span>匹配 0 项</span></div>
+            <p class="source-note">报告目录、项目标题和结果章节均未找到对应项目。</p>
+          </div>
+        </section>
+
+        <section class="lower">
+          <div class="explain">
+            <h3>为什么需要处理</h3>
+            <p><strong>这不等于系统认定“没有做试验”。</strong>它表示现有资料无法证明这项试验已经执行并写入报告。若该项目确实必做，需要补齐记录；若本次不适用，需要填写原因。</p>
+          </div>
+          <div class="next-step">
+            <h3>建议怎么处理</h3>
+            <div class="steps">
+              <div class="step"><b>1</b><span>先确认“高温存储”是否属于本次必须执行的项目。</span></div>
+              <div class="step"><b>2</b><span>必做：补充原始记录，并在检测报告中加入结果。</span></div>
+              <div class="step"><b>3</b><span>不适用：选择原因并留下审批说明。</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="trace-panel">
+          <div class="trace-head">
+            <h3>本条判断如何溯源</h3>
+            <span>文件、位置和检查范围默认展示</span>
+          </div>
+          <div class="trace-grid">
+            <div class="trace-column">
+              <div class="trace-label">计划要求的原文</div>
+              <div class="file-location">
+                <div>
+                  <strong>ITW-平台执行器用280电机试验大纲251014Rev1.xlsx</strong>
+                  <span>工作表“试验项目” · 第 3 页 · 高温存储行</span>
+                </div>
+                <button class="open-link">打开并定位</button>
+              </div>
+              <blockquote>高温存储　接受标准：实验后满足性能要求　引用标准：ISO-16750-4-5.1.2.1　试验时间：48h　试验条件：85℃</blockquote>
+            </div>
+            <div class="trace-column">
+              <div class="trace-label">未找到结果的依据</div>
+              <div class="search-scope">
+                <div class="search-row">
+                  <div class="search-row-head"><strong>原始记录资料包</strong><span>没有匹配文件</span></div>
+                  <div class="search-file">test_set_04-rd20-original-records.zip</div>
+                  <div class="search-stats"><b>共 54 个 PDF</b><b>9 类测试项目</b><b>全部完成文本检查</b></div>
+                  <div class="file-samples">文件示例：供电电压瞬时下降_0007_Mode 1.pdf、供电电压缓降和缓升_0004_Mode 1.pdf、反向电压_0016_Mode 2.pdf…</div>
+                  <button class="file-list-button">查看全部 54 个文件和检查状态</button>
+                </div>
+                <div class="search-row">
+                  <div class="search-row-head"><strong>检测报告</strong><span>没有匹配章节</span></div>
+                  <div class="search-file">报告书_E202508277046-1EN(RD20).docx</div>
+                  <div class="search-stats"><b>共 84 页</b><b>目录已检查</b><b>结果章节已检查</b></div>
+                  <button class="file-list-button">打开报告并查看检查位置</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <footer class="footer">
+        <button class="primary">确认需要补资料</button>
+        <button>标记为本次不适用</button>
+        <button>暂时搁置</button>
+        <button class="quiet">查看技术信息</button>
+      </footer>
+      <div class="technical">技术信息默认收起 · 检查规则 GRAPH-COVERAGE-001</div>
+    </article>
+  </main>
+</body>
+</html>

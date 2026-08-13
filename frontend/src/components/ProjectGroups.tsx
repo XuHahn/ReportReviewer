@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { getProjectGroups, createProjectGroup, updateProjectGroup, deleteProjectGroup, listUsers, getTags, createTag, updateTag, deleteTag, getCurrentUser } from '../api'
 import type { Tag } from '../types'
 import { logger } from '../logger'
+import Icon from './Icons'
 
 export default function ProjectGroups() {
   const [groups, setGroups] = useState<any[]>([])
@@ -139,7 +140,7 @@ export default function ProjectGroups() {
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="modal-header">
               <span className="modal-title">{editingId ? '编辑项目组' : '新建项目组'}</span>
-              <button onClick={() => setShowForm(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#667085' }} aria-label="关闭">✕</button>
+              <button onClick={() => setShowForm(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#667085' }} aria-label="关闭"><Icon name="close" /></button>
             </div>
             <div className="modal-body" style={{ padding: 20 }}>
               <label>项目组名称 *</label>
@@ -201,7 +202,7 @@ export default function ProjectGroups() {
               <div className="pg-member-bar">
                 <span className="pg-member-count">已选 {form.member_ids.length}/{users.length}</span>
                 <div className="pg-member-chips">
-                  {form.member_ids.map(eid => { const u = users.find((x: any) => x.employee_id === eid); return <span key={eid} className="member-chip" style={{ cursor: 'pointer' }} onClick={() => toggleMember(eid)}>{u?.name || eid}<span style={{ marginLeft: 4, color: '#98a2b3' }}>×</span></span>; })}
+                  {form.member_ids.map(eid => { const u = users.find((x: any) => x.employee_id === eid); return <span key={eid} className="member-chip" style={{ cursor: 'pointer' }} onClick={() => toggleMember(eid)}>{u?.name || eid}<Icon name="close" size={12} style={{ marginLeft: 4, color: '#98a2b3' }} /></span>; })}
                 </div>
               </div>
               <div className="pg-member-list">
@@ -230,7 +231,7 @@ export default function ProjectGroups() {
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, height: 400 }}>
             <div className="modal-header">
               <span className="modal-title">管理标签</span>
-              <button onClick={() => setTagModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#667085' }} aria-label="关闭">✕</button>
+              <button onClick={() => setTagModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#667085' }} aria-label="关闭"><Icon name="close" /></button>
             </div>
             <div style={{ display: 'flex', height: 'calc(100% - 52px)' }}>
               {/* Left sidebar: tag list */}

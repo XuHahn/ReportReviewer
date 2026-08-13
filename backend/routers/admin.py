@@ -1,15 +1,18 @@
 import json
-from datetime import datetime
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from auth import require_role
 from database import (
     get_all_settings_async, set_settings_batch_async,
-    get_stats_async, get_audit_logs_async, get_all_users_async,
+    get_set_stats_async,
+    save_audit_log_async,
 )
-from models import SystemSettings, SettingsUpdateRequest, AdminStatsResponse, User
-from utils.logger import LOG_DIR
+from models import SystemSettings, SettingsUpdateRequest, User
+from utils.logger import LOG_DIR, get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -105,40 +108,63 @@ async def get_settings(_user: User = Depends(require_role("admin"))):
 
 @router.put("/admin/settings", response_model=SystemSettings)
 async def update_settings(
-    body: SettingsUpdateRequest, _user: User = Depends(require_role("admin"))
+    body: SettingsUpdateRequest, request: Request = None,
+    _user: User = Depends(require_role("admin"))
 ):
+    allowed = {
+        "jwt_expire_hours", "max_upload_bytes", "rate_max_upload",
+        "rate_max_general", "rate_window_sec", "batch_max_files",
+        "deepseek_base_url",
+    }
+    unknown = sorted(set(body.settings) - allowed)
+    if unknown:
+        raise HTTPException(422, f"不支持的配置项: {', '.join(unknown)}")
+    numeric_bounds = {
+        "jwt_expire_hours": (1, 24 * 365),
+        "max_upload_bytes": (1024, 2 * 1024 * 1024 * 1024),
+        "rate_max_upload": (1, 10000),
+        "rate_max_general": (1, 100000),
+        "rate_window_sec": (1, 86400),
+        "batch_max_files": (1, 500),
+    }
+    for key, (minimum, maximum) in numeric_bounds.items():
+        if key not in body.settings:
+            continue
+        try:
+            value = int(body.settings[key])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, f"{key} 必须是整数") from exc
+        if not minimum <= value <= maximum:
+            raise HTTPException(422, f"{key} 必须在 {minimum} 到 {maximum} 之间")
+    if "deepseek_base_url" in body.settings:
+        parsed = urlparse(body.settings["deepseek_base_url"].strip())
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise HTTPException(422, "DeepSeek API 地址必须是有效的 HTTPS 地址")
+
+    client_ip = request.client.host if request and request.client else "unknown"
+    old_settings = await get_all_settings_async()
     await set_settings_batch_async(body.settings)
     settings = await get_all_settings_async()
+
+    # Log changed keys
+    changed_keys = [k for k, v in body.settings.items()
+                    if old_settings.get(k) != v]
+    if changed_keys:
+        logger.warning("settings_updated", changed_keys=changed_keys,
+                       by=_user.employee_id, client_ip=client_ip)
+        await save_audit_log_async(
+            client_ip=client_ip, action="update_settings",
+            filename="system_settings",
+            detail=json.dumps({"changed_keys": changed_keys}),
+            employee_id=_user.employee_id,
+        )
     return SystemSettings(settings=settings)
 
 
-@router.get("/admin/stats", response_model=AdminStatsResponse)
+@router.get("/admin/stats")
 async def get_admin_stats(_user: User = Depends(require_role("admin"))):
-    base = await get_stats_async()
-
-    users = await get_all_users_async()
-    total_users = len(users)
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_uploads = 0
-    for t in base.get("trends", []):
-        if t.get("date") == today:
-            today_uploads = t.get("uploads", 0)
-            break
-
-    recent_entries, _ = await get_audit_logs_async(limit=10)
-
-    return AdminStatsResponse(
-        overview=base["overview"],
-        pass_fail=base["pass_fail"],
-        severity_dist=base["severity_dist"],
-        trends=base["trends"],
-        top_locations=base["top_locations"],
-        top_actions=base["top_actions"],
-        total_users=total_users,
-        today_uploads=today_uploads,
-        recent_activity=recent_entries,
-    )
+    """Administrative aggregate statistics for the unified task model."""
+    return await get_set_stats_async()
 
 
 @router.get("/admin/logs/view")

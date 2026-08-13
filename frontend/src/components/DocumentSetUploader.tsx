@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   createDocumentSet, getDocumentSet, addDocumentToSet, deleteDocument, lockDocumentSet,
-  triggerReview, getPipelineIssues, annotateIssue, getProjectGroups, saveOverrides,
-  retryExtraction, cancelExtraction,
+  triggerReview, getPipelineIssues, annotateIssue, getProjectGroups, saveOverrides, confirmDocumentReview,
+  retryExtraction, cancelExtraction, getPipelineMetrics, downloadAuditReportExcel,
+  getStandards, getDocumentSetStandardReferences, updateDocumentSetStandards, streamReviewProgress,
+  updateDocumentSetProjectGroup,
 } from '../api'
-import type { DocType, FileStatus, DocumentSetOverview, PipelineIssue, PipelineResultSummary } from '../types'
+import type { DocType, FileStatus, DocumentSetOverview, PipelineIssue, PipelineResultSummary, PipelineMetricsResponse, EmcStandard } from '../types'
 import DocumentReviewModal from './DocumentReviewModal'
 import VersionHistoryModal from './VersionHistoryModal'
-import TracePanel from './TracePanel'
+import IssueDocumentMatrix from './IssueDocumentMatrix'
+import Icon from './Icons'
 import { logger } from '../logger'
 
 // ── Doc type metadata ────────────────────────────────────────────────────────
@@ -25,7 +28,6 @@ const DOC_SLOTS: DocSlotMeta[] = [
   { order: 1, docType: 'test_plan',        label: '试验计划', format: 'PDF / DOCX',   required: true  },
   { order: 2, docType: 'original_records', label: '原始记录', format: 'ZIP 压缩包',   required: true  },
   { order: 3, docType: 'final_report',     label: '检测报告', format: 'PDF / DOCX',   required: true  },
-  { order: 4, docType: 'test_standard',    label: '测试标准', format: 'PDF / DOCX',   required: false },
 ]
 
 const ICON_COLORS: Record<DocType, string> = {
@@ -75,45 +77,113 @@ function getSlotStatus(meta: DocSlotMeta, files: FileStatus[], uploading: Record
   if (uploading[meta.docType]) return 'uploading'
   const fs = fileForType(files, meta.docType)
   if (!fs) return 'empty'
-  if (fs.extraction_status === 'done') return 'done'
+  if (fs.extraction_status === 'done' || fs.extraction_status === 'partial') return 'done'
   if (fs.extraction_status === 'failed') return 'failed'
   if (fs.extraction_status === 'extracting' || fs.extraction_status === 'pending') return 'extracting'
   return 'empty'
+}
+
+const METRIC_STAGE_LABELS: Record<string, string> = {
+  pipeline_done: '整轮审核完成',
+  report_driven_summary: '报告驱动审核汇总',
+  module_llm_audit: '测试模块语义审核',
+  legacy_cross_validator: '补充一致性检查',
+  report_driven_deterministic: '四文件确定性核对',
+  identity_resolution: '测试项名称识别',
+  load_extraction: '读取文档提取结果',
+}
+
+const METRIC_TYPE_LABELS: Record<string, string> = {
+  pipeline_run: '整轮审核',
+  validation_stage: '一致性审核阶段',
+  module_audit: '测试模块审核',
+  identity_resolution: '测试项名称识别',
+  document_input: '文档数据读取',
+}
+
+const METRIC_STATUS_LABELS: Record<string, string> = {
+  partial: '已完成（发现问题）',
+  done: '已完成',
+  complete: '已完成',
+  cached: '已使用缓存',
+  loaded: '已读取',
+  failed: '失败',
+  error: '异常',
+  skipped: '已跳过',
+  running: '进行中',
+  active: '进行中',
+  passed: '已通过',
+}
+
+const METRIC_MODULE_LABELS: Record<string, string> = {
+  order_form: '委托单',
+  test_plan: '试验计划',
+  raw_records: '原始记录',
+  original_records: '原始记录',
+  final_report: '检测报告',
+}
+
+function metricStageLabel(stage: string, metricType: string): string {
+  return METRIC_STAGE_LABELS[stage] || METRIC_TYPE_LABELS[metricType] || stage || metricType || '审核阶段'
+}
+
+function metricModuleLabel(moduleKey: string, displayCode?: unknown): string {
+  const rawValue = moduleKey || (typeof displayCode === 'string' ? displayCode : '')
+  const cleanValue = rawValue.replace(/^NAME:/i, '').trim()
+  return METRIC_MODULE_LABELS[cleanValue] || cleanValue || '—'
+}
+
+function metricStatusLabel(status: string): string {
+  return METRIC_STATUS_LABELS[status] || status || '已完成'
+}
+
+function formatMetricDuration(durationMs: number): string {
+  const safeDuration = Math.max(0, Number(durationMs) || 0)
+  if (safeDuration >= 60_000) {
+    const minutes = Math.floor(safeDuration / 60_000)
+    const seconds = (safeDuration % 60_000) / 1000
+    return `${minutes}分${seconds.toFixed(1)}秒`
+  }
+  if (safeDuration < 1000) return `${Math.round(safeDuration)}毫秒`
+  return `${(safeDuration / 1000).toFixed(1)}秒`
 }
 
 // ── Pipeline progress steps ──────────────────────────────────────────────────
 
 // Fallback steps used when SSE is unavailable
 const FALLBACK_PIPELINE_STEPS = [
-  '测试项覆盖校验',
-  'TOC 三方覆盖',
-  '原始记录结论扫描',
-  '报告结论一致性',
-  '仪器校准有效期',
-  '仪器清单交叉比对',
-  '基本信息比对',
-  '日期跨度检查',
-  '电压一致性',
-  '测试模式一致性',
-  '数据行数对比',
-  '方法合规检查',
-  'TOC 完整性',
-  '多数投票',
-  '格式规则校验',
-  '物理范围校验',
-  '余量验证 + 超标检测',
-  '总体结论校验',
-  '签发日期逻辑',
-  '封面完整性',
-  'LLM 语义审核',
-  '供应商名称一致性',
-  '样品数量一致性',
-  '测试计划编号一致性',
+  '报告模块切分与原始记录匹配',
+  '模块开放参数与语义审核',
+  '报告驱动审核汇总',
+  '封面完整性与签发日期',
+  '余量公式验证',
+  '超标检测',
+  '限值参考校验',
+  '背景噪声校验',
+  '结论与测试等级一致性',
+  '目录与测试项覆盖',
+  '样品标识一致性',
+  '备注与 DUT 状态一致性',
+  '限值表频率范围连续性',
+  '试验步骤标准引用合规',
+  '供应商与客户字段一致性',
+  '基本信息与计划编号一致性',
+  '测试项三方覆盖',
+  '开放参数一致性',
+  '性能判据等级一致性',
+  '操作步骤一致性',
+  '日期跨度与物理范围',
+  '仪器清单与校准有效期',
 ]
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function DocumentSetUploader() {
+interface DocumentSetUploaderProps {
+  revisionTarget?: { setId: string; nonce: number } | null
+  onReviewComplete?: (setId: string) => void
+}
+
+export default function DocumentSetUploader({ revisionTarget, onReviewComplete }: DocumentSetUploaderProps) {
   // Core state
   const [setId, setSetId] = useState<string | null>(null)
   const [setStatus, setSetStatus] = useState<string>('new')
@@ -131,18 +201,32 @@ export default function DocumentSetUploader() {
   const [versionModal, setVersionModal] = useState<DocType | null>(null)
   const [deleting, setDeleting] = useState<Record<string, boolean>>({})
 
+  // Reusable standard knowledge selection (optional)
+  const [selectedStandards, setSelectedStandards] = useState<EmcStandard[]>([])
+  const [standardModalOpen, setStandardModalOpen] = useState(false)
+  const [availableStandards, setAvailableStandards] = useState<EmcStandard[]>([])
+  const [standardDraftIds, setStandardDraftIds] = useState<Set<string>>(new Set())
+  const [standardSearch, setStandardSearch] = useState('')
+  const [standardLoading, setStandardLoading] = useState(false)
+  const [standardReferences, setStandardReferences] = useState<Array<{ reference_code: string; normalized_code: string; sources: string[]; evidence: string[] }>>([])
+  const [standardSkipReasons, setStandardSkipReasons] = useState<Record<string, string>>({})
+
   // Pipeline state
   const [pipelineRunning, setPipelineRunning] = useState(false)
   const [pipelineResult, setPipelineResult] = useState<PipelineResultSummary | null>(null)
   const [pipelineIssues, setPipelineIssues] = useState<PipelineIssue[]>([])
-  const [pipelineStepIdx, setPipelineStepIdx] = useState(-1)
   const [pipelineSteps, setPipelineSteps] = useState<string[]>(FALLBACK_PIPELINE_STEPS)
+  const [pipelineStepStatuses, setPipelineStepStatuses] = useState<Record<number, 'wait' | 'active' | 'done'>>({})
+  const [pipelineStepDurations, setPipelineStepDurations] = useState<Record<number, number>>({})
+  const [pipelineMetrics, setPipelineMetrics] = useState<PipelineMetricsResponse | null>(null)
   const [annotationLoading, setAnnotationLoading] = useState<Record<string, boolean>>({})
+  const [exportingExcel, setExportingExcel] = useState(false)
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [selectedSource, setSelectedSource] = useState<{issueId: string, srcIdx: number} | null>(null)
 
   // Group picker
   const [selectedGroup, setSelectedGroup] = useState('')
+  const [selectedGroupId, setSelectedGroupId] = useState('')
   const [groupModalOpen, setGroupModalOpen] = useState(false)
   const [groupPickSearch, setGroupPickSearch] = useState('')
   const [groupPickCat, setGroupPickCat] = useState('全部')
@@ -168,6 +252,68 @@ export default function DocumentSetUploader() {
   const uploadAbortControllers = useRef<Record<string, AbortController>>({})  // per-docType cancel tokens
   useEffect(() => { selectedSourceRef.current = selectedSource }, [selectedSource])
 
+  // ── Load an existing set when "My Reports" opens a revision draft ───────────
+
+  const loadExistingSet = useCallback(async (targetSetId: string, asRevision = false) => {
+    setError(null)
+    try {
+      const overview = await getDocumentSet(targetSetId)
+      const loadedFiles = overview.files || []
+      setSetId(overview.set_id)
+      setSetStatus(overview.status)
+      setFiles(loadedFiles)
+      setSelectedStandards(overview.standards || [])
+      setSelectedGroup(overview.project_group_name || '')
+      setSelectedGroupId(overview.project_group_id || '')
+      setLocked(overview.status === 'locked' || overview.status === 'reviewing')
+      setPipelineRunning(false)
+      setPipelineResult(null)
+      setPipelineIssues([])
+      setPipelineMetrics(null)
+      setPipelineStepStatuses({})
+      setPipelineStepDurations({})
+      setExpandedIssues(new Set())
+      setSelectedSource(null)
+
+      setReviewedDocs(new Set(
+        loadedFiles.filter(file => Boolean(file.reviewed_at)).map(file => file.doc_type),
+      ))
+
+      if (asRevision || overview.status === 'revision') {
+        showToast('已载入修订草稿，请替换需要修改的文件')
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e.message || '载入修订草稿失败'
+      setError(msg)
+      logger.error('Failed to load existing document set', { component: 'DocumentSetUploader', setId: targetSetId }, e)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!revisionTarget?.setId) return
+    loadExistingSet(revisionTarget.setId, true)
+  }, [revisionTarget?.setId, revisionTarget?.nonce, loadExistingSet])
+
+  const loadPipelineMetrics = useCallback(async (targetSetId: string, runId?: string) => {
+    try {
+      const metrics = await getPipelineMetrics(targetSetId, runId)
+      setPipelineMetrics(metrics.metrics?.length ? metrics : null)
+    } catch (e) {
+      logger.warn('Failed to load pipeline metrics', {
+        component: 'DocumentSetUploader',
+        setId: targetSetId,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!setId || pipelineRunning) return
+    if (setStatus === 'reviewed' || pipelineIssues.length > 0 || pipelineResult) {
+      loadPipelineMetrics(setId, pipelineResult?.run_id)
+    }
+  }, [setId, setStatus, pipelineRunning, pipelineIssues.length, pipelineResult?.run_id, loadPipelineMetrics])
+
   // ── Poll extraction status ──────────────────────────────────────────────────
 
   const pollStatus = useCallback(async () => {
@@ -175,6 +321,7 @@ export default function DocumentSetUploader() {
     try {
       const overview: DocumentSetOverview = await getDocumentSet(setId)
       setFiles(overview.files || [])
+      setSelectedStandards(overview.standards || [])
       setSetStatus(overview.status)
       if (overview.status === 'locked') {
         setLocked(true)
@@ -262,8 +409,87 @@ export default function DocumentSetUploader() {
     return base.filter((g: any) => g.name.toLowerCase().includes(q) || (g.description || '').toLowerCase().includes(q))
   })()
 
-  function selectQuickGroup(name: string) {
-    setSelectedGroup(selectedGroup === name ? '' : name)
+  async function selectProjectGroup(groupId: string, name: string) {
+    const nextId = selectedGroupId === groupId ? '' : groupId
+    const nextName = nextId ? name : ''
+    const previousId = selectedGroupId
+    const previousName = selectedGroup
+    setSelectedGroupId(nextId)
+    setSelectedGroup(nextName)
+    if (!setId) return
+    try {
+      await updateDocumentSetProjectGroup(setId, nextId)
+    } catch (e: any) {
+      setSelectedGroupId(previousId)
+      setSelectedGroup(previousName)
+      showToast(e?.response?.data?.detail || '项目组保存失败')
+    }
+  }
+
+  async function openStandardPicker() {
+    if (locked || pipelineRunning) return
+    setStandardLoading(true)
+    setStandardSearch('')
+    try {
+      const sid = await ensureSet()
+      const [list, referenceResult] = await Promise.all([
+        getStandards(), getDocumentSetStandardReferences(sid),
+      ])
+      setAvailableStandards(list.filter((item) => item.knowledge_status === 'ready' && item.graph_status === 'published'))
+      setStandardReferences(referenceResult.references || [])
+      setStandardSkipReasons(Object.fromEntries((referenceResult.skips || []).map(item => [item.normalized_code, item.reason])))
+      setStandardDraftIds(new Set(selectedStandards.map((item) => item.id)))
+      setStandardModalOpen(true)
+    } catch (e: any) {
+      showToast(e?.response?.data?.detail || '标准库加载失败')
+    } finally {
+      setStandardLoading(false)
+    }
+  }
+
+  function toggleStandardDraft(id: string) {
+    setStandardDraftIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function isReferenceSelected(reference: { normalized_code: string }) {
+    return availableStandards.some(standard => {
+      if (!standardDraftIds.has(standard.id)) return false
+      const code = standard.normalized_code || standard.code.toUpperCase().replace(/[^A-Z0-9\u4e00-\u9fff]+/g, '')
+      const version = (standard.version || '').toUpperCase().replace(/[^A-Z0-9]+/g, '')
+      return reference.normalized_code === code
+        || (!!version && [code + version, code + version.slice(-4)].includes(reference.normalized_code))
+    })
+  }
+
+  const unresolvedStandardReferences = standardReferences.filter(reference => (
+    !isReferenceSelected(reference) && !standardSkipReasons[reference.normalized_code]?.trim()
+  ))
+
+  async function saveStandardSelection() {
+    setStandardLoading(true)
+    try {
+      const sid = await ensureSet()
+      const result = await updateDocumentSetStandards(
+        sid,
+        Array.from(standardDraftIds),
+        standardReferences.filter(reference => standardSkipReasons[reference.normalized_code]?.trim()).map(reference => ({
+          normalized_code: reference.normalized_code,
+          reference_code: reference.reference_code,
+          reason: standardSkipReasons[reference.normalized_code].trim(),
+        })),
+      )
+      setSelectedStandards(result.standards || [])
+      setStandardModalOpen(false)
+      showToast(result.standard_review_enabled ? `已选择 ${result.standards.length} 份标准` : '未选择标准，将跳过标准条款审核')
+    } catch (e: any) {
+      showToast(e?.response?.data?.detail || '标准选择保存失败')
+    } finally {
+      setStandardLoading(false)
+    }
   }
 
   // ── Init document set ───────────────────────────────────────────────────────
@@ -278,6 +504,9 @@ export default function DocumentSetUploader() {
     const promise = (async () => {
       try {
         const { set_id } = await createDocumentSet()
+        if (selectedGroupId) {
+          await updateDocumentSetProjectGroup(set_id, selectedGroupId)
+        }
         setSetId(set_id)
         setSetStatus('open')
         return set_id
@@ -399,6 +628,15 @@ export default function DocumentSetUploader() {
       const replaceId = replaceDocRef.current
       replaceDocRef.current = ''
       await addDocumentToSet(sid, file, docType, replaceId || undefined, abortCtrl.signal)
+      setReviewedDocs(prev => {
+        const next = new Set(prev)
+        next.delete(docType)
+        return next
+      })
+      setPipelineResult(null)
+      setPipelineIssues([])
+      setExpandedIssues(new Set())
+      setSelectedSource(null)
       // Refresh file list — do it twice with a short gap to ensure DB write is visible
       const refreshFiles = async () => {
         try {
@@ -479,56 +717,63 @@ export default function DocumentSetUploader() {
     if (!setId) return
     setLocking(true)
     try {
+      await updateDocumentSetProjectGroup(setId, selectedGroupId)
       await lockDocumentSet(setId)
       setLocked(true)
       setSetStatus('locked')
 
       setPipelineRunning(true)
-      setPipelineStepIdx(0)
+      setPipelineSteps([])
+      setPipelineStepStatuses({})
+      setPipelineStepDurations({})
 
-      // Try SSE for real-time progress; fall back to fake animation
-      const token = localStorage.getItem('emc_review_token') || ''
-      const sseUrl = `/api/sets/${setId}/review/progress?token=${encodeURIComponent(token)}`
-      let eventSource: EventSource | null = null
-      let useSse = false
+      // Open an authenticated fetch stream before triggering the review so the
+      // bearer token never appears in URLs or access logs.
+      const progressAbort = new AbortController()
+      const useSse = typeof ReadableStream !== 'undefined'
 
-      try {
-        eventSource = new EventSource(sseUrl)
-        // Set up SSE listener before triggering review
-        eventSource.onmessage = (evt) => {
+      if (useSse) {
+        streamReviewProgress(setId, (data) => {
           try {
-            const data = JSON.parse(evt.data)
-            if (data.label && data.step) {
-              setPipelineStepIdx(data.step - 1)
+            const step = Number(data.step)
+            const total = Number(data.total)
+            if (data.label && Number.isFinite(step) && step > 0) {
+              if (data.status === 'active' || data.status === 'done') {
+                setPipelineStepStatuses(prev => ({ ...prev, [step]: data.status }))
+              }
+              const durationMs = Number(data.duration_ms)
+              if (data.status === 'done' && Number.isFinite(durationMs) && durationMs >= 0) {
+                setPipelineStepDurations(prev => ({ ...prev, [step]: durationMs }))
+              }
               setPipelineSteps(prev => {
                 const next = [...prev]
-                if (data.label && data.step <= next.length) {
-                  next[data.step - 1] = data.label
+                const targetLength = Number.isFinite(total) && total > 0
+                  ? total
+                  : Math.max(next.length, step)
+                while (next.length < targetLength) {
+                  next.push(`步骤 ${next.length + 1}`)
                 }
+                next[step - 1] = data.label
                 return next
               })
             }
-            if (data.status === 'complete' || data.status === 'timeout') {
-              eventSource?.close()
+            if (data.status === 'complete' || data.status === 'error') {
+              progressAbort.abort()
             }
           } catch {}
-        }
-        eventSource.onerror = () => {
-          eventSource?.close()
-          useSse = false
-        }
-        useSse = true
-      } catch {
-        // SSE not supported, fall back to fake progress
-        useSse = false
+        }, progressAbort.signal).catch(error => {
+          if (error?.name !== 'AbortError') {
+            logger.warn('Pipeline progress stream failed', {
+              component: 'DocumentSetUploader', setId, error: String(error),
+            })
+          }
+        })
       }
 
       if (!useSse) {
-        // Fallback: fake progress animation
-        for (let i = 0; i < FALLBACK_PIPELINE_STEPS.length; i++) {
-          await new Promise(r => setTimeout(r, 200 + Math.random() * 300))
-          setPipelineStepIdx(i)
-        }
+        // Without stream support, do not invent per-step progress or timing.
+        setPipelineSteps(['审核执行中（当前浏览器不支持实时步骤）'])
+        setPipelineStepStatuses({ 1: 'active' })
       }
 
       try {
@@ -539,15 +784,43 @@ export default function DocumentSetUploader() {
 
         const { issues } = await getPipelineIssues(setId)
         setPipelineIssues(issues)
+        await loadPipelineMetrics(setId, result.run_id)
+        onReviewComplete?.(setId)
       } catch (e: any) {
         logger.error('Pipeline trigger failed', { component: 'DocumentSetUploader', setId }, e)
+        const errorMessage = (e as any)?.response?.data?.detail || (e as any).message || '未知错误'
+        let previousIssues: PipelineIssue[] = []
+        try {
+          const existing = await getPipelineIssues(setId)
+          previousIssues = existing.issues || []
+          setPipelineIssues(previousIssues)
+        } catch (issueErr) {
+          logger.warn('Failed to reload previous pipeline issues after review failure', {
+            component: 'DocumentSetUploader',
+            setId,
+            error: issueErr instanceof Error ? issueErr.message : String(issueErr),
+          })
+        }
+        // The lock request already succeeded before review startup. A model
+        // preflight/runtime failure leaves the backend set locked so it can be
+        // retried from the task workbench; mirror that persisted state instead
+        // of presenting a non-existent editable revision locally.
+        setLocked(true)
+        setSetStatus('locked')
+        setError(`审核未完成：${errorMessage}`)
         setPipelineResult({
           set_id: setId, status: 'error', is_clean: false,
-          duration_seconds: 0, issues: { critical: 0, warning: 0 },
-          errors: [(e as any)?.response?.data?.detail || (e as any).message || '未知错误'],
+          duration_seconds: 0, issues: { critical: 0, warning: 0, info: 0 },
+          errors: [
+            previousIssues.length > 0
+              ? `${errorMessage}；已保留上一轮 ${previousIssues.length} 条问题结果`
+              : errorMessage,
+          ],
         })
+        await loadPipelineMetrics(setId)
+        showToast('审核未完成，已保留上一轮结果')
       } finally {
-        eventSource?.close()
+        progressAbort.abort()
       }
     } catch (e: any) {
       const msg = `锁定失败: ${(e as any)?.response?.data?.detail || (e as any).message || '未知错误'}`
@@ -577,6 +850,32 @@ export default function DocumentSetUploader() {
     }
   }
 
+  async function handleExportAuditExcel() {
+    if (!setId) {
+      showToast('暂无可导出的文档集')
+      return
+    }
+    setExportingExcel(true)
+    try {
+      const { blob, filename } = await downloadAuditReportExcel(setId)
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      showToast('审核报告 Excel 已导出')
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e.message || '导出审核报告失败'
+      showToast(msg)
+      logger.error('Failed to export audit report Excel', { component: 'DocumentSetUploader', setId }, e)
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   // ── Computed ────────────────────────────────────────────────────────────────
 
   const requiredSlots = DOC_SLOTS.filter(s => s.required)
@@ -598,7 +897,37 @@ export default function DocumentSetUploader() {
   const resultCritical = pipelineIssues.filter(i => i.severity === 'CRITICAL').length
   const resultWarning = pipelineIssues.filter(i => i.severity === 'WARNING').length
   const resultInfo = pipelineIssues.filter(i => i.severity === 'INFO').length
+  const resultCategoryCount = new Set(pipelineIssues.map(i => i.category || '未分类')).size
   const showResults = (locked && !pipelineRunning) || pipelineIssues.length > 0 || pipelineResult !== null
+  const pipelineFailed = pipelineResult?.status === 'error' || Boolean(pipelineResult?.errors?.length)
+  const resultHeaderText = pipelineFailed
+    ? (pipelineIssues.length > 0 ? `${pipelineIssues.length} 条上一轮问题 · 本次审核未完成` : '本次审核未完成')
+    : (pipelineIssues.length > 0 ? `${pipelineIssues.length} 条明细 · ${resultCategoryCount} 类问题` : '无问题')
+  const passSummary = pipelineFailed
+    ? '失败'
+    : pipelineIssues.length > 0
+      ? resultCategoryCount
+      : (pipelineResult?.is_clean ? '通过' : `${pipelineSteps.length - (pipelineResult?.errors?.length || 0)}/${pipelineSteps.length}`)
+  const metricItems = pipelineMetrics?.metrics || []
+  const failedMetricCount = metricItems.filter(m => ['failed', 'error'].includes(m.status)).length
+  const moduleMetricCount = metricItems.filter(m => m.metric_type === 'module_audit').length
+  const pipelineRunDuration = metricItems
+    .filter(m => m.metric_type === 'pipeline_run' || m.stage === 'pipeline_done')
+    .reduce((maxDuration, m) => Math.max(maxDuration, Number(m.duration_ms) || 0), 0)
+  const totalMetricDuration = Number(pipelineMetrics?.summary?.duration_ms) || pipelineRunDuration || metricItems
+    .reduce((maxDuration, m) => Math.max(maxDuration, Number(m.duration_ms) || 0), 0)
+  const slowestMetrics = [...metricItems]
+    .filter(m => Number(m.duration_ms) > 0)
+    .sort((a, b) => Number(b.duration_ms || 0) - Number(a.duration_ms || 0))
+    .slice(0, 6)
+  const modeLabel = setStatus === 'revision'
+    ? '修订中'
+    : setStatus === 'reviewed'
+      ? '已审核'
+      : locked
+        ? '审核中'
+        : '新审核'
+  const submitLabel = setStatus === 'revision' ? '重新提交审核' : '锁定并提交审核'
 
   // ═════════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -617,9 +946,9 @@ export default function DocumentSetUploader() {
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          四源校验
+          报告审核
           <span style={{ fontSize: '.7rem', fontWeight: 600, padding: '5px 12px', borderRadius: 18, background: '#eef2ff', color: '#4f46e5' }}>
-            {setId ? (locked ? '审核中' : '新审核') : '新审核'}
+            {setId ? modeLabel : '新审核'}
           </span>
         </h2>
         {setId && (
@@ -639,6 +968,21 @@ export default function DocumentSetUploader() {
         </div>
       )}
 
+      {setStatus === 'revision' && (
+        <div style={{
+          marginBottom: 30,
+          padding: '12px 16px',
+          background: '#fffaeb',
+          border: '1px solid #fedf89',
+          borderRadius: 10,
+          color: '#b54708',
+          fontSize: '.76rem',
+          lineHeight: 1.6,
+        }}>
+          已从“我的报告”创建修订。请替换修改后的文件；替换完成后只需重新核查被替换的文档，再提交重新审核。
+        </div>
+      )}
+
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* PROJECT GROUP — chip selector                                          */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
@@ -648,7 +992,7 @@ export default function DocumentSetUploader() {
           {quickGroups.map(g => (
             <button
               key={g.id}
-              onClick={() => selectQuickGroup(g.name)}
+              onClick={() => selectProjectGroup(g.id, g.name)}
               style={{
                 fontSize: '.7rem', padding: '6px 16px', borderRadius: 22,
                 border: `1.5px solid ${selectedGroup === g.name ? '#4f46e5' : '#e2e8f0'}`,
@@ -678,9 +1022,9 @@ export default function DocumentSetUploader() {
         padding: 6, boxShadow: '0 1px 3px rgba(0,0,0,.04)',
       }}>
         {[
-          { num: 1, title: '上传文档', sub: '4 必传 + 1 选传', done: step1Done, active: !step1Done },
+          { num: 1, title: '上传文档', sub: '4 必传 + 可选标准库', done: step1Done, active: !step1Done },
           { num: 2, title: '核查提取结果', sub: '逐份确认 AI 提取数据', done: step2Done, active: step2Active },
-          { num: 3, title: '交叉审核', sub: '锁定 → 管线 → 出结果', done: step3Done, active: step3Active },
+          { num: 3, title: '证据图审核', sub: '锁定 → 建图 → 出结论', done: step3Done, active: step3Active },
         ].map((s, i) => {
           const isActive = s.active && !s.done
           const isDone = s.done
@@ -698,7 +1042,7 @@ export default function DocumentSetUploader() {
                 background: isActive ? '#4f46e5' : isDone ? '#16a34a' : '#f1f5f9',
                 color: (isActive || isDone) ? '#fff' : '#94a3b8',
               }}>
-                {isDone ? '✓' : s.num}
+                {isDone ? <IconCheck size={16} /> : s.num}
               </div>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: '.85rem', color: isActive ? '#4f46e5' : isDone ? '#16a34a' : '#334155' }}>
@@ -724,7 +1068,7 @@ export default function DocumentSetUploader() {
         </div>
 
         {/* 5 Doc cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16 }}>
+        <div className="document-card-grid">
           {DOC_SLOTS.map(meta => {
             const status = getSlotStatus(meta, files, uploading)
             const fs = fileForType(files, meta.docType)
@@ -786,7 +1130,7 @@ export default function DocumentSetUploader() {
             } else if (status === 'done') {
               statusEl = (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: isReviewed ? '#16a34a' : '#f59e0b', fontSize: '.66rem', fontWeight: 600 }}>
-                  <IconCheck /> 提取完成{isReviewed ? ' · 已核查 ✓' : ' · 待核查'}
+                  <IconCheck /> 提取完成{isReviewed ? ' · 已核查' : ' · 待核查'}
                   {isReviewed && (editedCounts[meta.docType] || 0) > 0 && (
                     <span style={{ color: '#7c3aed', fontSize: '.58rem', fontWeight: 600 }}>{editedCounts[meta.docType]}处人工修改</span>
                   )}
@@ -865,7 +1209,7 @@ export default function DocumentSetUploader() {
                       fontSize: '.66rem', fontWeight: 700, lineHeight: 1, padding: 0,
                       opacity: deleting[meta.docType] ? .5 : undefined,
                     }}
-                  >{deleting[meta.docType] ? '⋯' : '×'}</button>
+                  >{deleting[meta.docType] ? <IconSpinner /> : <Icon name="close" size={14} />}</button>
                 )}
 
                 {/* Icon */}
@@ -956,7 +1300,7 @@ export default function DocumentSetUploader() {
                       style={{ fontSize: '.62rem', padding: '5px 12px', borderRadius: 8, fontWeight: 600, background: '#fff', color: '#dc2626', borderColor: '#fecaca' }}
                       onClick={e => { e.stopPropagation(); handleCancelUpload(meta.docType) }}
                       title={status === 'uploading' ? '取消上传' : '取消提取'}
-                    >✕ 取消</button>
+                    ><Icon name="close" size={13} />取消</button>
                   </div>
                 )}
 
@@ -971,6 +1315,36 @@ export default function DocumentSetUploader() {
               </div>
             )
           })}
+
+          {/* Standards are selected from the reusable knowledge base, never uploaded here. */}
+          <div
+            onClick={openStandardPicker}
+            style={{
+              borderRadius: 14, padding: '28px 18px 22px', textAlign: 'center',
+              position: 'relative', minHeight: 210, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', transition: 'all .18s',
+              background: selectedStandards.length ? '#f0fdf4' : '#fafbfc',
+              border: selectedStandards.length ? '2px solid #bbf7d0' : '2px dashed #e2e8f0',
+              cursor: locked || pipelineRunning ? 'default' : 'pointer', opacity: locked ? .82 : 1,
+            }}
+          >
+            <div style={{ position: 'absolute', top: 10, left: 12, width: 10, height: 10, borderRadius: '50%', background: selectedStandards.length ? '#16a34a' : '#d4d4d8' }} />
+            <span style={{ position: 'absolute', top: 8, right: 8, fontSize: '.55rem', padding: '3px 8px', borderRadius: 10, fontWeight: 700, background: '#f1f5f9', color: '#64748b' }}>可选</span>
+            <div style={{ width: 50, height: 50, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, background: '#f1f5f9', color: '#64748b' }}>
+              <IconDocStandard />
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '.8rem', marginBottom: 3, color: '#1e293b' }}>测试标准</div>
+            <div style={{ fontSize: '.64rem', color: '#94a3b8' }}>从标准库选择</div>
+            {selectedStandards.length > 0 ? (
+              <div style={{ width: '100%', marginTop: 8 }}>
+                {selectedStandards.slice(0, 2).map((std) => <div key={std.id} title={`${std.code} ${std.title}`} style={{ fontSize: '.61rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 3 }}>{std.code}{std.version ? ` · ${std.version}` : ''}</div>)}
+                {selectedStandards.length > 2 && <div style={{ fontSize: '.6rem', color: '#94a3b8', marginTop: 3 }}>另有 {selectedStandards.length - 2} 份</div>}
+                {!locked && <button className="pg-btn" onClick={(e) => { e.stopPropagation(); openStandardPicker() }} style={{ fontSize: '.62rem', padding: '5px 12px', borderRadius: 8, marginTop: 10, color: '#4f46e5', borderColor: '#c7d2fe', background: '#fff' }}>更改选择</button>}
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, color: '#b45309', fontSize: '.61rem', lineHeight: 1.45 }}>未选择时跳过<br />标准条款审核</div>
+            )}
+          </div>
         </div>
 
         {/* ── Progress bar + Lock action ─────────────────────────────────── */}
@@ -981,12 +1355,12 @@ export default function DocumentSetUploader() {
                 <div style={{
                   height: '100%', borderRadius: 4,
                   background: canLock ? '#16a34a' : '#4f46e5',
-                  width: `${Math.round((doneCount / DOC_SLOTS.length) * 100)}%`,
+                  width: `${Math.round((doneCount / requiredSlots.length) * 100)}%`,
                   transition: 'width .4s ease',
                 }} />
               </div>
               <span style={{ fontSize: '.75rem', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>
-                {doneCount}/{DOC_SLOTS.length} 就绪
+                {doneCount}/{requiredSlots.length} 就绪
               </span>
             </div>
 
@@ -1009,7 +1383,7 @@ export default function DocumentSetUploader() {
                 {locked
                   ? '文档集已锁定，审核已提交'
                   : canLock
-                    ? '4/4 上传 + 提取 + 核查全部完成 · 可提交审核'
+                    ? `4/4 上传 + 提取 + 核查全部完成 · ${selectedStandards.length ? `已选择 ${selectedStandards.length} 份标准` : '未选择标准，将跳过标准条款审核'} · ${setStatus === 'revision' ? '可重新提交审核' : '可提交审核'}`
                     : !requiredDone
                       ? `还需上传 ${requiredSlots.filter(s => getSlotStatus(s, files, uploading) !== 'done').map(s => DOC_LABELS[s.docType]).join('、')}（已就绪 ${doneCount}/4）`
                       : !allReviewed
@@ -1031,7 +1405,7 @@ export default function DocumentSetUploader() {
                   border: '1.5px solid transparent',
                 }}
               >
-                {locking ? '锁定中...' : locked ? '已锁定' : '锁定并提交审核'}
+                {locking ? (pipelineRunning ? '审核中...' : '锁定中...') : locked ? '已锁定' : submitLabel}
               </button>
             </div>
           </>
@@ -1047,13 +1421,30 @@ export default function DocumentSetUploader() {
           background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: 16,
         }}>
           <div style={{ fontWeight: 700, fontSize: '.9rem', marginBottom: 16, color: '#4f46e5', display: 'flex', alignItems: 'center', gap: 10 }}>
-            ⚙️ 交叉验证管线执行中...
+            <Icon name="settings" size={17} />统一证据图审核执行中...
           </div>
+          {pipelineSteps.length === 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 14, padding: '7px 0',
+              fontSize: '.78rem', color: '#64748b', fontWeight: 600,
+            }}>
+              <div style={{
+                width: 30, height: 28, borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '.66rem', fontWeight: 700, flexShrink: 0,
+                background: '#eef2ff', color: '#4f46e5',
+              }}><IconSpinner /></div>
+              <span style={{ flex: 1 }}>等待后端开始审核...</span>
+            </div>
+          )}
           {pipelineSteps.map((step, i) => {
-            const isDone = i < pipelineStepIdx
-            const isActive = i === pipelineStepIdx
+            const stepNumber = i + 1
+            const stepStatus = pipelineStepStatuses[stepNumber] || 'wait'
+            const isDone = stepStatus === 'done'
+            const isActive = stepStatus === 'active'
+            const durationMs = pipelineStepDurations[stepNumber]
             return (
-              <div key={step} style={{
+              <div key={`pipeline-step-${i}`} style={{
                 display: 'flex', alignItems: 'center', gap: 14, padding: '7px 0',
                 fontSize: '.78rem', color: isDone ? '#16a34a' : isActive ? '#4f46e5' : '#94a3b8',
                 fontWeight: isActive ? 600 : 400,
@@ -1065,10 +1456,14 @@ export default function DocumentSetUploader() {
                   background: isDone ? '#dcfce7' : isActive ? '#eef2ff' : '#f1f5f9',
                   color: isDone ? '#16a34a' : isActive ? '#4f46e5' : '#94a3b8',
                 }}>
-                  {isDone ? '✓' : isActive ? '⟳' : i + 1}
+                  {isDone ? <IconCheck size={13} /> : isActive ? <IconSpinner /> : i + 1}
                 </div>
                 <span style={{ flex: 1 }}>{step}</span>
-                {isDone && <span style={{ fontSize: '.68rem', color: '#94a3b8' }}>{(0.1 + i * 0.2).toFixed(1)}s</span>}
+                {isDone && durationMs !== undefined && (
+                  <span style={{ fontSize: '.68rem', color: '#94a3b8' }}>
+                    {durationMs < 100 ? '<0.1s' : `${(durationMs / 1000).toFixed(1)}s`}
+                  </span>
+                )}
                 {isActive && <span style={{ fontSize: '.68rem', color: '#4f46e5' }}>进行中...</span>}
               </div>
             )
@@ -1093,9 +1488,37 @@ export default function DocumentSetUploader() {
             <span style={{ fontSize: '.68rem', color: '#94a3b8' }}>
               {setId && <span>{setId} · </span>}
               {pipelineResult?.duration_seconds ? `耗时 ${pipelineResult.duration_seconds.toFixed(1)}s · ` : ''}
-              {pipelineIssues.length > 0 ? `${pipelineIssues.length} 个问题` : '无问题'}
+              {resultHeaderText}
             </span>
           </div>
+
+          {selectedStandards.length === 0 && (
+            <div style={{
+              margin: '14px 18px 0', padding: '10px 12px', background: '#fffbeb',
+              border: '1px solid #fde68a', borderRadius: 10, color: '#92400e',
+              fontSize: '.72rem', lineHeight: 1.55,
+            }}>
+              本次未选择测试标准，标准条款、适用范围、参数和限值相关审查未执行；四份业务文档之间的一致性审核不受影响。
+            </div>
+          )}
+
+
+          {pipelineFailed && (
+            <div style={{
+              margin: '14px 18px 0',
+              padding: '10px 12px',
+              background: '#fff1f2',
+              border: '1px solid #fecdd3',
+              borderRadius: 10,
+              color: '#be123c',
+              fontSize: '.72rem',
+              lineHeight: 1.55,
+              fontWeight: 600,
+            }}>
+              本次审核未完成：{pipelineResult?.errors?.[0] || '请求中断或服务异常'}。
+              {pipelineIssues.length > 0 ? ' 下方显示的是上一轮已保存的问题结果。' : ' 当前没有可展示的问题结果，请重新提交审核。'}
+            </div>
+          )}
 
           {/* Summary cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: 18 }}>
@@ -1112,10 +1535,12 @@ export default function DocumentSetUploader() {
               <div style={{ fontSize: '.64rem', color: '#64748b', marginTop: 4, fontWeight: 600 }}>提示 INFO</div>
             </div>
             <div style={{ textAlign: 'center', padding: '14px 10px', borderRadius: 12, background: '#f8fafc' }}>
-              <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#16a34a' }}>
-                {pipelineResult?.is_clean ? '✓' : `${pipelineSteps.length - (pipelineResult?.errors?.length || 0)}/${pipelineSteps.length}`}
+              <div style={{ fontSize: '1.6rem', fontWeight: 700, color: pipelineFailed ? '#dc2626' : '#16a34a' }}>
+                {passSummary}
               </div>
-              <div style={{ fontSize: '.64rem', color: '#64748b', marginTop: 4, fontWeight: 600 }}>检查通过</div>
+              <div style={{ fontSize: '.64rem', color: '#64748b', marginTop: 4, fontWeight: 600 }}>
+                {pipelineFailed ? '审核状态' : pipelineIssues.length > 0 ? '问题类别' : '检查通过'}
+              </div>
             </div>
           </div>
 
@@ -1135,182 +1560,107 @@ export default function DocumentSetUploader() {
             </div>
           )}
 
+          {pipelineMetrics && metricItems.length > 0 && (
+            <div style={{
+              margin: '0 16px 12px',
+              border: '1px solid #e2e8f0',
+              borderRadius: 10,
+              overflow: 'hidden',
+              background: '#fff',
+            }}>
+              <div style={{
+                padding: '9px 12px',
+                background: '#f8fafc',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}>
+                <span style={{ fontSize: '.72rem', fontWeight: 700 }}>运行观测</span>
+                <span style={{ fontSize: '.58rem', color: '#94a3b8' }}>
+                  运行批次 {pipelineMetrics.run_id || '最新'}
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, padding: 10 }}>
+                {[
+                  ['指标数', metricItems.length],
+                  ['模块审核', moduleMetricCount],
+                  ['异常阶段', failedMetricCount],
+                  ['实际总耗时', formatMetricDuration(totalMetricDuration)],
+                ].map(([label, value]) => (
+                  <div key={label} style={{ background: '#f8fafc', borderRadius: 8, padding: '8px 10px' }}>
+                    <div style={{ fontSize: '.56rem', color: '#64748b', fontWeight: 600 }}>{label}</div>
+                    <div style={{ fontSize: '.9rem', color: label === '异常阶段' && Number(value) > 0 ? '#dc2626' : '#0f172a', fontWeight: 800, marginTop: 3 }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              {slowestMetrics.length > 0 && (
+                <div style={{ padding: '0 10px 10px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.62rem' }}>
+                    <thead>
+                      <tr style={{ color: '#64748b', background: '#fafbfc' }}>
+                        <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid #e2e8f0' }}>阶段</th>
+                        <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid #e2e8f0' }}>模块</th>
+                        <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid #e2e8f0' }}>状态</th>
+                        <th style={{ textAlign: 'right', padding: '6px 8px', borderBottom: '1px solid #e2e8f0' }}>耗时</th>
+                        <th style={{ textAlign: 'right', padding: '6px 8px', borderBottom: '1px solid #e2e8f0' }}>问题</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {slowestMetrics.map((m, idx) => (
+                        <tr key={`${m.metric_type}-${m.stage}-${m.module_key}-${idx}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '6px 8px', color: '#334155', fontWeight: 600 }}>{metricStageLabel(m.stage, m.metric_type)}</td>
+                          <td style={{ padding: '6px 8px', color: '#64748b' }}>{metricModuleLabel(m.module_key, m.details?.display_code)}</td>
+                          <td style={{ padding: '6px 8px', color: ['failed', 'error'].includes(m.status) ? '#dc2626' : m.status === 'partial' ? '#f59e0b' : '#16a34a', fontWeight: 700 }}>{metricStatusLabel(m.status)}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{formatMetricDuration(Number(m.duration_ms || 0))}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{m.issue_count || 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ padding: '7px 8px 0', color: '#64748b', fontSize: '.58rem', lineHeight: 1.6 }}>
+                    各阶段可能并行执行或包含子阶段，阶段耗时不能相加；实际总耗时以整轮审核从开始到完成的时间为准。
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Issue list */}
           <div style={{ padding: '0 16px 12px' }}>
             <div style={{ fontWeight: 700, fontSize: '.78rem', marginBottom: 10 }}>
-              发现的问题
-              <span style={{ fontSize: '.62rem', color: '#94a3b8', fontWeight: 400, marginLeft: 8 }}>点击标签直接标注</span>
+              问题明细
+              <span style={{ fontSize: '.62rem', color: '#94a3b8', fontWeight: 400, marginLeft: 8 }}>
+                共 {pipelineIssues.length} 条，四份文件统一对比
+              </span>
             </div>
-            {pipelineIssues.length === 0 && (
+            {pipelineIssues.length === 0 && !pipelineFailed && (
               <div style={{ padding: 20, textAlign: 'center', color: '#16a34a', fontSize: '.78rem' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><IconCheck /> 未发现问题，所有检查项通过</span>
               </div>
             )}
-            {pipelineIssues.map(issue => {
-              const sevColor = issue.severity === 'CRITICAL' ? '#dc2626' : issue.severity === 'WARNING' ? '#f59e0b' : '#4f46e5'
-              const isIgnored = issue.human_status === 'ignored'
-              const isConfirmed = issue.human_status === 'confirmed'
-              const statusColor = isConfirmed ? '#16a34a' : isIgnored ? '#94a3b8' : sevColor
-              const isExpanded = expandedIssues.has(issue.id)
-              const hasSources = issue.sources && Object.keys(issue.sources).length > 1
-
-              return (
-                <div key={issue.id} style={{
-                  padding: '10px 14px', borderRadius: 10, marginBottom: 8,
-                  borderLeft: `3px solid ${isIgnored ? '#adb5bd' : sevColor}`,
-                  background: isIgnored ? 'rgba(108,117,125,.03)' : issue.severity === 'CRITICAL' ? '#fef2f2' : issue.severity === 'WARNING' ? '#fffbeb' : '#f8f7ff',
-                  opacity: isIgnored ? .4 : 1,
-                  fontSize: '.73rem', display: 'flex', gap: 14, alignItems: 'flex-start',
-                }}>
-                  <span style={{
-                    fontSize: '.58rem', padding: '3px 8px', borderRadius: 6,
-                    background: sevColor, color: '#fff', fontWeight: 700, flexShrink: 0,
-                  }}>
-                    {issue.severity === 'CRITICAL' ? '严重' : issue.severity === 'WARNING' ? '警告' : '提示'}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                      {issue.field_name}
-                      {hasSources && (
-                        <span onClick={() => {
-                          setExpandedIssues(prev => {
-                            const next = new Set(prev)
-                            if (next.has(issue.id)) { next.delete(issue.id); setSelectedSource(null) }
-                            else next.add(issue.id)
-                            return next
-                          })
-                        }} style={{ fontSize: '.6rem', color: '#4f46e5', cursor: 'pointer', marginLeft: 10, userSelect: 'none' }}>
-                          {isExpanded ? '▲ 收起对比' : '▼ 展开对比'}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ color: '#64748b', fontSize: '.64rem', lineHeight: 1.5 }}>{issue.description}</div>
-                    {issue.sources && Object.keys(issue.sources).length > 0 && !isExpanded && (
-                      <div style={{ fontSize: '.6rem', color: '#94a3b8', marginTop: 4 }}>
-                        来源: {Object.entries(issue.sources).map(([k, v]) => `${k}(${v})`).join(' · ')}
-                      </div>
-                    )}
-                    {/* Expandable comparison */}
-                    {isExpanded && hasSources && (
-                      <div style={{ marginTop: 10, border: '1px solid #e2e8f0', borderRadius: 7, overflow: 'hidden', background: '#fff' }}>
-                        <div style={{ padding: '5px 8px', background: '#f8fafc', fontSize: '.6rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 5 }}>
-                          四源数据对比
-                          <span style={{ fontSize: '.53rem', color: '#94a3b8', fontWeight: 400 }}>— 点击行查看提取溯源</span>
-                        </div>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.62rem' }}>
-                          <thead>
-                            <tr style={{ background: '#fafbfc' }}>
-                              <th style={{ textAlign: 'left', padding: '5px 8px', borderBottom: '1px solid #e9ecef', fontSize: '.6rem', color: '#64748b' }}>数据源</th>
-                              <th style={{ textAlign: 'left', padding: '5px 8px', borderBottom: '1px solid #e9ecef', fontSize: '.6rem', color: '#64748b' }}>值</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {Object.entries(issue.sources).map(([source, value], idx) => {
-                              const allValues = Object.values(issue.sources)
-                              const uniqueValues = new Set(allValues)
-                              const isMajority = allValues.filter(v => v === value).length >= allValues.length / 2
-                              const isDisputed = uniqueValues.size > 1
-                              const isMissing = typeof value === 'string' && (value.startsWith('未') || value.startsWith('缺失'))
-                              const cellBg = isDisputed ? (isMajority ? 'rgba(22,163,74,.04)' : 'rgba(220,38,38,.04)') : 'transparent'
-                              const hasTrace = issue.trace && issue.trace[idx]
-                              const isSelected = selectedSource?.issueId === issue.id && selectedSource?.srcIdx === idx
-                              return (
-                                <tr key={source}
-                                  onClick={() => {
-                                    if (!hasTrace) return
-                                    setExpandedIssues(prev => { const next = new Set(prev); next.add(issue.id); return next })
-                                    setSelectedSource(prev => (prev?.issueId === issue.id && prev?.srcIdx === idx) ? null : { issueId: issue.id, srcIdx: idx })
-                                  }}
-                                  title={hasTrace ? '点击查看溯源详情' : undefined}
-                                  style={{
-                                    borderBottom: '1px solid #f1f5f9', background: isSelected ? '#f0f6ff' : cellBg,
-                                    cursor: hasTrace ? 'pointer' : 'default',
-                                    transition: 'background .12s',
-                                  }}>
-                                  <td style={{
-                                    padding: '5px 8px', fontWeight: 600, fontSize: '.62rem',
-                                    color: isSelected ? '#175cd3' : undefined,
-                                  }}>{source}</td>
-                                  <td style={{
-                                    padding: '5px 8px', fontFamily: 'monospace', fontSize: '.62rem',
-                                    color: isMissing ? '#94a3b8' : (isSelected ? '#175cd3' : (isDisputed ? (isMajority ? '#16a34a' : '#dc2626') : '#344054')),
-                                    fontWeight: isDisputed && !isMajority ? 600 : 400,
-                                    fontStyle: isMissing ? 'italic' : undefined,
-                                  }}>
-                                    {value}
-                                    {isDisputed && !isMajority && !isMissing && <span style={{ fontSize: '.53rem', color: '#dc2626', marginLeft: 5 }}>← 不一致</span>}
-                                    {hasTrace && <span style={{ opacity: isSelected ? 1 : .4, marginLeft: 4, transition: 'opacity .12s' }}>
-                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ verticalAlign: -1 }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                    </span>}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                        {issue.source_step && (
-                          <div style={{ padding: '5px 10px', fontSize: '.55rem', color: '#94a3b8', borderTop: '1px solid #f1f5f9' }}>
-                            检测步骤: {issue.source_step} · 验证类型: {issue.validation_type}
-                          </div>
-                        )}
-
-                        {/* Trace panel */}
-                        {selectedSource?.issueId === issue.id && issue.trace?.[selectedSource.srcIdx] && (() => {
-                          const tr = issue.trace![selectedSource.srcIdx]
-                          const srcValues = Object.values(issue.sources)
-                          return (
-                            <TracePanel
-                              trace={tr}
-                              sourceValue={typeof srcValues[selectedSource.srcIdx] === 'string' ? srcValues[selectedSource.srcIdx] as string : String(srcValues[selectedSource.srcIdx])}
-                              onClose={() => setSelectedSource(null)}
-                              onViewFullDoc={() => {
-                                const docTypeMap: Record<string, string> = {
-                                  order_form: 'order_form', test_plan: 'test_plan',
-                                  original_records: 'original_records', final_report: 'final_report',
-                                }
-                                const dt = docTypeMap[tr.doc_type] || tr.doc_type
-                                setReviewModal(dt as DocType)
-                              }}
-                            />
-                          )
-                        })()}
-                      </div>
-                    )}
-                    {issue.human_status !== 'pending' && issue.human_comment && (
-                      <div style={{
-                        marginTop: 5, padding: '4px 8px',
-                        background: isConfirmed ? 'rgba(22,163,74,.05)' : 'rgba(108,117,125,.05)',
-                        borderRadius: 4, fontSize: '.6rem',
-                        display: 'flex', alignItems: 'center', gap: 8,
-                      }}>
-                        <span style={{ color: statusColor, fontWeight: 600 }}>
-                          {isConfirmed ? '已确认' : '已忽略'}
-                          {issue.annotated_by && ` · ${issue.annotated_by}`}
-                          {issue.annotated_at && ` · ${issue.annotated_at.slice(0, 16)}`}
-                        </span>
-                        <span style={{ color: '#64748b' }}>{issue.human_comment}</span>
-                      </div>
-                    )}
-                  </div>
-                  <select
-                    value={issue.human_status}
-                    onChange={e => handleAnnotate(issue.id, e.target.value)}
-                    disabled={annotationLoading[issue.id]}
-                    style={{
-                      fontSize: '.6rem', padding: '3px 6px', borderRadius: 6,
-                      border: `1px solid ${statusColor}`,
-                      fontFamily: 'inherit', flexShrink: 0,
-                      background: isConfirmed ? 'rgba(22,163,74,.04)' : isIgnored ? 'rgba(108,117,125,.04)' : undefined,
-                      opacity: isIgnored ? .5 : 1,
-                    }}
-                  >
-                    <option value="pending">待处理</option>
-                    <option value="confirmed">已确认</option>
-                    <option value="ignored">误报/忽略</option>
-                  </select>
-                </div>
-              )
-            })}
+            {pipelineIssues.length === 0 && pipelineFailed && (
+              <div style={{ padding: 20, textAlign: 'center', color: '#be123c', fontSize: '.78rem', fontWeight: 600 }}>
+                审核未完成，未生成可信结果。请重新提交审核。
+              </div>
+            )}
+            {pipelineIssues.length > 0 && (
+              <IssueDocumentMatrix
+                issues={pipelineIssues}
+                files={files}
+                annotationLoading={annotationLoading}
+                expandedIssues={expandedIssues}
+                selectedSource={selectedSource}
+                onExpandedChange={setExpandedIssues}
+                onSelectedSourceChange={setSelectedSource}
+                onAnnotate={handleAnnotate}
+                onOpenDocument={docType => setReviewModal(docType)}
+                standards={selectedStandards}
+                setId={setId || undefined}
+                onMappingSaved={() => showToast('映射已保存，请重新提交审核以应用新规则')}
+              />
+            )}
           </div>
 
           {/* Footer actions */}
@@ -1319,12 +1669,26 @@ export default function DocumentSetUploader() {
             display: 'flex', gap: 10, alignItems: 'center',
           }}>
             <button className="pg-btn" style={{ fontSize: '.75rem' }}>操作记录</button>
-            <button className="pg-btn" style={{ fontSize: '.75rem', background: '#4f46e5', color: '#fff', borderColor: '#4f46e5' }}>导出审核报告</button>
+            <button
+              className="pg-btn"
+              onClick={handleExportAuditExcel}
+              disabled={exportingExcel || !setId}
+              style={{
+                fontSize: '.75rem',
+                background: '#4f46e5',
+                color: '#fff',
+                borderColor: '#4f46e5',
+                opacity: exportingExcel || !setId ? .65 : 1,
+              }}
+            >
+              {exportingExcel ? '导出中…' : '导出审核报告'}
+            </button>
             <div style={{ flex: 1 }} />
             <button className="pg-btn" style={{ fontSize: '.75rem' }} onClick={() => {
               setSetId(null); setSetStatus('new'); setFiles([]); setLocked(false)
+              setSelectedGroup(''); setSelectedGroupId('')
               setReviewedDocs(new Set()); setEditedCounts({}); setPipelineResult(null); setPipelineIssues([])
-              setPipelineStepIdx(-1); setExpandedIssues(new Set()); setSelectedSource(null)
+              setPipelineStepStatuses({}); setPipelineStepDurations({}); setExpandedIssues(new Set()); setSelectedSource(null)
             }}>+ 新建文档集</button>
           </div>
         </div>
@@ -1346,14 +1710,17 @@ export default function DocumentSetUploader() {
           label={DOC_LABELS[reviewModal]}
           onClose={() => setReviewModal(null)}
           onConfirm={async (editedValues: Record<string, string>) => {
-            // Save human overrides to backend
-            if (reviewDocId && Object.keys(editedValues).length > 0) {
-              try {
+            if (!reviewDocId) return
+            try {
+              if (Object.keys(editedValues).length > 0) {
                 await saveOverrides(setId, reviewDocId, editedValues)
                 setEditedCounts(prev => ({ ...prev, [reviewModal]: Object.keys(editedValues).length }))
-              } catch (e: any) {
-                logger.error('Failed to save overrides', { component: 'DocumentSetUploader', docType: reviewModal }, e)
               }
+              await confirmDocumentReview(setId, reviewDocId)
+            } catch (e: any) {
+              logger.error('Failed to confirm document review', { component: 'DocumentSetUploader', docType: reviewModal }, e)
+              showToast(e?.response?.data?.detail || '核查结果保存失败，请重新确认')
+              throw e
             }
             markReviewed(reviewModal)
             const editNote = Object.keys(editedValues).length > 0 ? `（${Object.keys(editedValues).length} 处人工修改）` : ''
@@ -1367,6 +1734,8 @@ export default function DocumentSetUploader() {
                 setEditedCounts(prev => ({ ...prev, [reviewModal]: Object.keys(editedValues).length }))
               } catch (e: any) {
                 logger.error('Failed to save overrides', { component: 'DocumentSetUploader', docType: reviewModal }, e)
+                showToast(e?.response?.data?.detail || '人工修改保存失败')
+                throw e
               }
             }
             showToast(`${DOC_LABELS[reviewModal]} 编辑已保存（未完成核查）`)
@@ -1391,7 +1760,7 @@ export default function DocumentSetUploader() {
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="modal-header">
               <span className="modal-title">选择项目组</span>
-              <button onClick={() => setGroupModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#667085' }} aria-label="关闭">✕</button>
+              <button onClick={() => setGroupModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#667085' }} aria-label="关闭"><Icon name="close" /></button>
             </div>
             <div className="modal-body" style={{ padding: 18 }}>
               <input className="filter-input" style={{ width: '100%', marginBottom: 12 }} placeholder="搜索项目组..." value={groupPickSearch} onChange={e => { setGroupPickSearch(e.target.value); setGroupPickCat('全部') }} autoFocus />
@@ -1405,13 +1774,13 @@ export default function DocumentSetUploader() {
                   ))}
                 </div>
                 <div style={{ flex: 1, overflowY: 'auto' }}>
-                  <div onClick={() => { setSelectedGroup(''); setGroupModalOpen(false) }} style={{ padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, borderBottom: '1px solid #f9fafb', borderRadius: 7, background: selectedGroup === '' ? '#fff7ed' : undefined, color: selectedGroup === '' ? '#b54708' : '#667085' }}>
+                  <div onClick={() => { void selectProjectGroup('', ''); setGroupModalOpen(false) }} style={{ padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, borderBottom: '1px solid #f9fafb', borderRadius: 7, background: selectedGroup === '' ? '#fff7ed' : undefined, color: selectedGroup === '' ? '#b54708' : '#667085' }}>
                     <span style={{ width: 6, height: 7, borderRadius: '50%', background: '#b54708', opacity: selectedGroup === '' ? 1 : 0, flexShrink: 0 }} /> 不选择
                   </div>
                   {groupPickFiltered.map((g: any) => {
                     const sel = selectedGroup === g.name
                     return (
-                      <div key={g.id} onClick={() => { setSelectedGroup(g.name); setGroupModalOpen(false) }} style={{ padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, borderBottom: '1px solid #f9fafb', borderRadius: 7, background: sel ? '#fff7ed' : undefined, color: sel ? '#b54708' : '#344054' }}>
+                      <div key={g.id} onClick={() => { void selectProjectGroup(g.id, g.name); setGroupModalOpen(false) }} style={{ padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, borderBottom: '1px solid #f9fafb', borderRadius: 7, background: sel ? '#fff7ed' : undefined, color: sel ? '#b54708' : '#344054' }}>
                         <span style={{ width: 6, height: 7, borderRadius: '50%', background: '#b54708', opacity: sel ? 1 : 0, flexShrink: 0 }} />
                         <div><div style={{ fontWeight: sel ? 600 : 500 }}>{g.name}</div>{g.description && <div style={{ fontSize: 10, color: '#98a2b3', marginTop: 1 }}>{g.description}</div>}</div>
                       </div>
@@ -1429,6 +1798,53 @@ export default function DocumentSetUploader() {
         </div>
       )}
 
+      {/* Standard knowledge-base picker */}
+      {standardModalOpen && (
+        <div className="modal-overlay" onClick={() => !standardLoading && setStandardModalOpen(false)}>
+          <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 720 }}>
+            <div className="modal-header">
+              <div><span className="modal-title">选择测试标准</span><div style={{ color: '#94a3b8', fontSize: '.68rem', marginTop: 3 }}>仅显示已完成人工确认并发布的标准，可多选，也可不选择</div></div>
+              <button onClick={() => setStandardModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#667085' }} aria-label="关闭"><Icon name="close" /></button>
+            </div>
+            <div className="modal-body" style={{ padding: 18 }}>
+              {standardReferences.length > 0 && <div style={{ border: '1px solid #bfdbfe', background: '#eff6ff', padding: 12, marginBottom: 12 }}>
+                <strong style={{ fontSize: '.76rem', color: '#1e3a8a' }}>四份文件中识别到的标准引用</strong>
+                <div style={{ color: '#64748b', fontSize: '.66rem', margin: '4px 0 10px' }}>每一项都必须选择已发布标准，或填写本次跳过原因后才能提交审核。</div>
+                {standardReferences.map(reference => {
+                  const selected = isReferenceSelected(reference)
+                  return <div key={reference.normalized_code} style={{ display: 'grid', gridTemplateColumns: '150px 80px 1fr', gap: 8, alignItems: 'center', marginTop: 7 }}>
+                    <span style={{ fontSize: '.72rem', fontWeight: 700 }}>{reference.reference_code}</span>
+                    <span style={{ fontSize: '.66rem', color: selected ? '#15803d' : '#b45309' }}>{selected ? '已选择对应版本' : '待处理'}</span>
+                    {!selected && <input className="filter-input" value={standardSkipReasons[reference.normalized_code] || ''} onChange={event => setStandardSkipReasons(prev => ({ ...prev, [reference.normalized_code]: event.target.value }))} placeholder="不选择时填写原因" />}
+                  </div>
+                })}
+              </div>}
+              <input className="filter-input" style={{ width: '100%', marginBottom: 12 }} placeholder="搜索标准编号、名称或版本..." value={standardSearch} onChange={e => setStandardSearch(e.target.value)} autoFocus />
+              <div style={{ border: '1px solid #e2e8f0', maxHeight: 360, overflowY: 'auto' }}>
+                <label style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '13px 14px', cursor: 'pointer', borderBottom: '1px solid #eef2f7', background: standardDraftIds.size === 0 ? '#fff7ed' : '#fff' }}>
+                  <input type="checkbox" checked={standardDraftIds.size === 0} onChange={() => setStandardDraftIds(new Set())} />
+                  <div><strong style={{ fontSize: '.78rem', color: '#334155' }}>不选择标准</strong><div style={{ fontSize: '.66rem', color: '#b45309', marginTop: 3 }}>本次不审查标准条款，并在结果中提示审核范围</div></div>
+                </label>
+                {availableStandards.filter((std) => {
+                  const q = standardSearch.trim().toLowerCase()
+                  return !q || `${std.code} ${std.title} ${std.version}`.toLowerCase().includes(q)
+                }).map((std) => (
+                  <label key={std.id} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '13px 14px', cursor: 'pointer', borderBottom: '1px solid #eef2f7', background: standardDraftIds.has(std.id) ? '#f0fdf4' : '#fff' }}>
+                    <input type="checkbox" checked={standardDraftIds.has(std.id)} onChange={() => toggleStandardDraft(std.id)} style={{ marginTop: 2 }} />
+                    <div style={{ minWidth: 0, flex: 1 }}><strong style={{ fontSize: '.78rem', color: '#1e293b' }}>{std.code}</strong>{std.version && <span style={{ color: '#64748b', fontSize: '.68rem', marginLeft: 8 }}>{std.version}</span>}<div style={{ color: '#64748b', fontSize: '.69rem', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{std.title}</div><div style={{ color: '#94a3b8', fontSize: '.62rem', marginTop: 4 }}>{std.page_count} 页 · {std.chunk_count} 个知识块 · {std.organization || '未分类机构'}</div></div>
+                  </label>
+                ))}
+                {availableStandards.length === 0 && <div style={{ padding: 28, textAlign: 'center', color: '#94a3b8', fontSize: '.75rem' }}>标准库暂无已发布版本，请先到“标准库”完成逐条确认并发布</div>}
+              </div>
+            </div>
+            <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#64748b', fontSize: '.7rem' }}>已选择 {standardDraftIds.size} 份</span>
+              <div style={{ display: 'flex', gap: 10 }}><button className="filter-btn" onClick={() => setStandardModalOpen(false)} disabled={standardLoading}>取消</button><button className="filter-btn" style={{ background: '#4f46e5', borderColor: '#4f46e5', color: '#fff' }} onClick={saveStandardSelection} disabled={standardLoading || unresolvedStandardReferences.length > 0}>{standardLoading ? '保存中...' : unresolvedStandardReferences.length ? `还有 ${unresolvedStandardReferences.length} 项未处理` : '确认选择'}</button></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirm Lock Modal */}
       {confirmOpen && (
         <div className="modal-overlay" onClick={() => { if (!locking) setConfirmOpen(false) }}>
@@ -1436,7 +1852,7 @@ export default function DocumentSetUploader() {
             <div className="modal-header">
               <span className="modal-title">确认提交</span>
               {!locking && (
-                <button onClick={() => setConfirmOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#667085' }} aria-label="关闭">✕</button>
+                <button onClick={() => setConfirmOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#667085' }} aria-label="关闭"><Icon name="close" /></button>
               )}
             </div>
             <div className="modal-body" style={{ padding: 28, textAlign: 'center' }}>
@@ -1446,10 +1862,11 @@ export default function DocumentSetUploader() {
                   <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
                 </svg>
               </div>
-              <div style={{ fontWeight: 700, fontSize: '.9rem', marginBottom: 8 }}>确认提交四源交叉验证？</div>
+              <div style={{ fontWeight: 700, fontSize: '.9rem', marginBottom: 8 }}>确认提交交叉验证？</div>
               <div style={{ fontSize: '.8rem', color: 'var(--color-gray-400)', marginBottom: 30, lineHeight: 1.7 }}>
                 锁定后所有文件的当前版本将被冻结<br/>
                 系统将对 {requiredSlots.length} 份文档进行交叉一致性校验<br/>
+                {selectedStandards.length > 0 ? `同时使用已选 ${selectedStandards.length} 份标准知识库审查条款` : '未选择标准，本次将跳过标准条款相关审查'}<br/>
                 审核完成前不可修改文件
               </div>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>

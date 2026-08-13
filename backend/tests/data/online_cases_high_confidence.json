@@ -1,0 +1,126 @@
+{
+  "root": "/Users/ethan/Downloads/线上案件",
+  "updated_at": "2026-07-09",
+  "full_pipeline_cases": [
+    {
+      "case_id": "E202509103924",
+      "case_dir": "HC_E202509103924",
+      "report": "E202509103924-1.docx",
+      "raw_records": "E202509103924原始记录.zip",
+      "order_form": "EMC测试申请表E202509103924.xls",
+      "test_plan": "廣電 DVP test Second Round.xlsx",
+      "expected_raw_keys": [
+        "ALIAS:conducted_emissions_ce",
+        "ALIAS:radiated_emissions_re"
+      ],
+      "notes": "Plan names use RF Conducted/Radiated Emissions while report/raw use CE/RE; use as alias-classification training."
+    },
+    {
+      "case_id": "E202509246315",
+      "case_dir": "HC_E202509246315",
+      "report": "E202509246315-1-V1.docx",
+      "raw_records": "E202509246315原始记录.zip",
+      "order_form": "EMC测试申请表E202509246315.pdf",
+      "test_plan": "广电(1).xlsx",
+      "expected_raw_keys": [
+        "NAME:ESA对沿电源线瞬态传导的抗扰性能",
+        "NAME:ESA瞬态传导发射",
+        "NAME:大电流注入抗扰度(BCI)",
+        "NAME:强制暴走特性",
+        "NAME:放射电磁特性(TEMcell)",
+        "NAME:辐射发射",
+        "NAME:辐射抗扰度(ALSE)",
+        "NAME:过渡电压特性",
+        "NAME:过渡电压耐久"
+      ],
+      "notes": "PDF order form requires the PDF order-form extraction path for cover comparison."
+    },
+    {
+      "case_id": "E202512042558",
+      "case_dir": "HC_E202512042558",
+      "report": "E202512042558-1.docx",
+      "raw_records": "E202512042558原始记录.zip",
+      "order_form": "EMC测试申请表E202512022095(2).xls",
+      "test_plan": "KJ-1548F方向盘开关验证计划（DVP）(1).xlsx",
+      "expected_raw_keys": [
+        "NAME:信号线瞬态抗扰度",
+        "NAME:电磁传导发射(CE02)电压法",
+        "NAME:瞬态抗扰度试验",
+        "NAME:零部件模块的传导发射电流探头法",
+        "NAME:零部件模块的辐射发射ALSE法"
+      ]
+    },
+    {
+      "case_id": "E202601060767",
+      "case_dir": "HC_E202601060767",
+      "report": "报告书_E202601060767-1_202605060916V1.docx",
+      "raw_records": "E202601060767原始记录.zip",
+      "order_form": "EMC（噪声试验）测试申请表20260422.xls",
+      "test_plan": "EMC 测试计划SC26-1F 260207.pdf",
+      "expected_raw_keys": [
+        "NAME:点火噪声试验"
+      ]
+    },
+    {
+      "case_id": "E202603254184",
+      "case_dir": "HC_E202603254184",
+      "report": "E202603254184-1ENV1.docx",
+      "raw_records": "E202603254184原始记录.zip",
+      "order_form": "EMC测试申请表（最新版）(1).pdf",
+      "test_plan": "A18367 DAF DDM EMC Test PlanV1.2DAF 20200531.docx",
+      "expected_raw_keys": [
+        "NAME:大电流注入抗扰度(BCI)",
+        "NAME:瞬态传导抗扰度",
+        "NAME:静电放电"
+      ],
+      "notes": "English test plan with Chinese raw-record names; good bilingual classification training case."
+    },
+    {
+      "case_id": "E202604213234",
+      "case_dir": "HC_E202604213234",
+      "report": "报告书_E202604213234-1_202604291648.docx",
+      "raw_records": "E202604213234原始记录.zip",
+      "order_form": "EMC测试申请表E20260424塔.xls",
+      "test_plan": "大冶-灯具准入实验标准（新.xlsx",
+      "expected_raw_keys": [
+        "NAME:瞬态抗扰度试验",
+        "NAME:系统12V电源电压波动试验"
+      ],
+      "notes": "User confirmed the 大冶 standard spreadsheet is the test plan."
+    },
+    {
+      "case_id": "E202605287495",
+      "case_dir": "HC_E202605287495",
+      "report": "报告书_E202605287495-V1.docx",
+      "raw_records": "E202605287495原始记录.zip",
+      "order_form": "EMC测试申请表E20260601（塔）.xls",
+      "test_plan": "大冶-灯具准入实验标准（新.xlsx",
+      "expected_raw_keys": [
+        "NAME:瞬态抗扰度试验",
+        "NAME:系统12V电源电压波动试验"
+      ],
+      "notes": "Same vendor-plan style as E202604213234."
+    }
+  ],
+  "raw_record_training_cases": [],
+  "excluded_standard_only_cases": [
+    {
+      "case_id": "E202603161753",
+      "case_dir": "E202603161753",
+      "report": "E202603161753-1-V1.docx",
+      "raw_records": "E202603161753原始记录.zip",
+      "order_form": "服务委托单（民品）(1.6).xls",
+      "standard": "QBAWL00022022 汽车电子电器部件电磁兼容性能要求及试验方-解密.pdf",
+      "notes": "User confirmed there is no test plan in this folder; the PDF is a standard, so this case is excluded from current training."
+    },
+    {
+      "case_id": "E202605097370",
+      "case_dir": "E202605097370",
+      "report": "E202605097370-1EN - V1.docx",
+      "raw_records": "E202605097370原始记录.zip",
+      "order_form": "服务委托单（民品）-TRATONTMS1(1).xls",
+      "standard": "CVS46_(更新版)_2022版(1).pdf",
+      "notes": "User confirmed there is no test plan in this folder; the PDF is a standard, so this case is excluded from current training."
+    }
+  ]
+}

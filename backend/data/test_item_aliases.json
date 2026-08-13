@@ -1,0 +1,143 @@
+{
+  "version": 2,
+  "updated_at": "2026-07-28",
+  "groups": [
+    {
+      "canonical": "conducted_emissions_ce",
+      "status": "confirmed",
+      "category": "conducted_emissions",
+      "display_name": "传导发射 CE",
+      "aliases": [
+        "传导发射 CE",
+        "传导发射CE",
+        "EMC: RF Conducted Emissions",
+        "RF Conducted Emissions",
+        "EMC:射频传导发射",
+        "射频传导发射"
+      ],
+      "evidence_cases": [
+        "E202509103924"
+      ],
+      "notes": "Confirmed from high-confidence case E202509103924: plan names RF Conducted Emissions while report/raw use 传导发射 CE."
+    },
+    {
+      "canonical": "radiated_emissions_re",
+      "status": "confirmed",
+      "category": "radiated_emissions",
+      "display_name": "辐射发射 RE",
+      "aliases": [
+        "辐射发射：RE",
+        "辐射发射:RE",
+        "辐射发射 RE",
+        "辐射发射RE",
+        "EMC: RF Radiated Emissions",
+        "RF Radiated Emissions",
+        "EMC:射频辐射发射",
+        "射频辐射发射"
+      ],
+      "evidence_cases": [
+        "E202509103924"
+      ],
+      "notes": "Confirmed from high-confidence case E202509103924: plan names RF Radiated Emissions while report/raw use 辐射发射 RE."
+    },
+    {
+      "canonical": "supply_voltage_drop_p4_12v",
+      "status": "confirmed",
+      "category": "supply_voltage_variation",
+      "display_name": "12V 电源电压波动（P4）",
+      "aliases": [
+        "P4",
+        "脉冲4",
+        "试验脉冲P4",
+        "电压波动测试",
+        "系统12V电源电压波动试验",
+        "系统 12V 电源电压波动试验"
+      ],
+      "evidence_cases": [
+        "EMC-20260728-prr2fg"
+      ],
+      "notes": "Confirmed by the reviewed plan row: 电压波动测试 explicitly specifies 试验脉冲P4; raw record and report name the same 12V supply-voltage-drop execution descriptively."
+    },
+    {
+      "canonical": "iso16750_2_4_4_superimposed_ac_voltage",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "叠加交流电压",
+      "aliases": ["交变电压叠加实验", "叠加交流电压", "Superimposed alternating voltage"],
+      "evidence_cases": ["EMC-20260729-or78tf", "ISO 16750-2:2012 4.4"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.4."
+    },
+    {
+      "canonical": "iso16750_2_4_5_slow_voltage_change",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "供电电压缓降和缓升",
+      "aliases": ["电源电压缓慢下降和上升", "供电电压缓降和缓升", "Slow decrease and increase of the supply voltage"],
+      "evidence_cases": ["EMC-20260729-or78tf", "ISO 16750-2:2012 4.5"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.5."
+    },
+    {
+      "canonical": "iso16750_2_4_6_1_supply_voltage_drop",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "供电电压瞬时下降",
+      "aliases": ["供电电压中断", "供电电压瞬时下降", "Instantaneous drop in power supply voltage"],
+      "evidence_cases": ["EMC-20260729-or78tf", "ISO 16750-2:2012 4.6.1"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.6.1."
+    },
+    {
+      "canonical": "iso16750_2_4_6_2_reset_behavior",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "电压骤降复位性能",
+      "aliases": ["压降复位", "对电压骤降的复位性能", "Reset test"],
+      "evidence_cases": ["EMC-20260729-or78tf", "ISO 16750-2:2012 4.6.2"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.6.2."
+    },
+    {
+      "canonical": "iso16750_2_4_6_3_starting_profile",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "启动特性",
+      "aliases": ["启动实验", "启动特性", "Startup feature"],
+      "evidence_cases": ["EMC-20260729-or78tf", "ISO 16750-2:2012 4.6.3"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.6.3."
+    },
+    {
+      "canonical": "iso16750_2_4_7_reversed_voltage",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "反向电压",
+      "aliases": ["反向电压", "Reversed voltage"],
+      "evidence_cases": ["EMC-20260729-or78tf", "ISO 16750-2:2012 4.7"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.7."
+    },
+    {
+      "canonical": "iso16750_2_4_8_ground_supply_offset",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "参考接地和供电偏移",
+      "aliases": ["参考接地和供电偏移", "Ground reference and supply offset"],
+      "evidence_cases": ["EMC-20260729-or78tf", "ISO 16750-2:2012 4.8"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.8."
+    },
+    {
+      "canonical": "iso16750_2_4_9_open_circuit",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "开路试验",
+      "aliases": ["开路测试", "开路试验", "Open circuit tests", "Open circuit test", "Single line interruption"],
+      "evidence_cases": ["EMC-20260729-or78tf", "EMC-20260810-4q39sm", "ISO 16750-2:2012 4.9"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section for ISO 16750-2:2012 4.9; Single line interruption is the report's executed 4.9 method label."
+    },
+    {
+      "canonical": "iso16750_2_4_10_short_circuit_protection",
+      "status": "confirmed",
+      "category": "electrical_loads",
+      "display_name": "短路保护",
+      "aliases": ["短路保护", "Short circuit protection", "Short circuit pretection", "Short circuit protection - Signal circuits"],
+      "evidence_cases": ["EMC-20260729-or78tf", "EMC-20260810-4q39sm", "ISO 16750-2:2012 4.10"],
+      "notes": "Confirmed by the reviewed plan clause, raw-record item and report section; the PRETECTION spelling and Signal circuits method label are retained as source aliases."
+    }
+  ]
+}

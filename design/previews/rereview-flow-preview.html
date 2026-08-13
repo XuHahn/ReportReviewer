@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>已审核报告修订 UX 预览</title>
+  <style>
+    :root {
+      --color-primary: #0f3460;
+      --color-primary-dark: #1a1a2e;
+      --color-error: #b42318;
+      --color-error-bg: #fef3f2;
+      --color-error-border: #fecdca;
+      --color-warning: #b54708;
+      --color-warning-bg: #fffaeb;
+      --color-info: #175cd3;
+      --color-info-bg: #f0f6ff;
+      --color-gray-50: #fafbfc;
+      --color-gray-100: #f0f2f5;
+      --color-gray-200: #e4e7ec;
+      --color-gray-300: #d0d5dd;
+      --color-gray-400: #788596;
+      --color-gray-500: #667085;
+      --color-gray-600: #475467;
+      --color-gray-700: #344054;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+      background: #edf0f3;
+      color: var(--color-primary-dark);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app-layout { display: flex; height: 100vh; }
+
+    .app-side {
+      width: 200px;
+      background: #111827;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow: hidden;
+      box-shadow: 4px 0 24px rgba(0,0,0,.12);
+    }
+
+    .side-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 14px;
+      white-space: nowrap;
+    }
+
+    .side-logo-text { font-size: 14px; font-weight: 700; }
+    .side-nav { flex: 1; display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; }
+
+    .side-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 8px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: #9ca3af;
+      font-size: 13px;
+      text-align: left;
+      width: 100%;
+    }
+
+    .side-item-on { background: #2563eb; color: #fff; }
+    .side-icon { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .side-user { display: flex; align-items: center; gap: 10px; padding: 12px; border-top: 1px solid rgba(255,255,255,.06); font-size: 12px; color: #9ca3af; }
+    .side-avatar { width: 28px; height: 28px; border-radius: 50%; background: #374151; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+    .side-user-info { display: flex; flex-direction: column; min-width: 0; }
+    .side-user-name { font-weight: 500; font-size: 13px; color: #e5e7eb; }
+    .side-user-role { font-size: 11px; color: #6b7280; }
+
+    .app-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #edf0f3; }
+    .main-topbar { padding: 12px 24px; border-bottom: 1px solid #e4e7ec; background: #fff; display: flex; align-items: center; font-size: 14px; font-weight: 600; color: #1f2937; }
+    .main-content { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+    .screen-note {
+      position: fixed;
+      top: 18px;
+      right: 24px;
+      z-index: 1200;
+      background: rgba(17,24,39,.92);
+      color: #fff;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.2);
+    }
+
+    .history-page {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px 0;
+      min-height: 720px;
+      position: relative;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .page-head h2 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--color-gray-700);
+    }
+
+    .page-head p {
+      font-size: .78rem;
+      color: var(--color-gray-400);
+      margin-top: 4px;
+    }
+
+    .filter-btn,
+    .pg-btn,
+    .pg-add-btn {
+      border: 1px solid var(--color-gray-300);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--color-gray-500);
+      font-family: inherit;
+      cursor: default;
+      white-space: nowrap;
+    }
+
+    .filter-btn { padding: 8px 16px; font-size: 13px; font-weight: 500; }
+    .pg-btn { padding: 6px 14px; font-size: 12px; }
+    .pg-add-btn { padding: 10px 24px; background: var(--color-primary); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; }
+    .pg-btn.primary { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+    .pg-btn.success { background: #16a34a; color: #fff; border-color: #16a34a; }
+    .pg-btn.warning { background: var(--color-warning-bg); color: var(--color-warning); border-color: #fedf89; }
+
+    .set-table {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid var(--color-gray-200);
+      overflow: hidden;
+    }
+
+    .set-row {
+      display: grid;
+      grid-template-columns: 1fr 100px 90px 160px;
+      gap: 0;
+      align-items: center;
+      padding: 12px 16px;
+      font-size: .72rem;
+      border-bottom: 1px solid var(--color-gray-100);
+    }
+
+    .set-row:last-child { border-bottom: none; }
+    .set-head { padding: 10px 16px; background: var(--color-gray-50); font-size: .68rem; font-weight: 700; color: var(--color-gray-500); border-bottom: 1px solid var(--color-gray-200); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: .6rem;
+      font-weight: 600;
+    }
+
+    .status-reviewed { color: #2f9e44; background: rgba(47,158,68,.08); }
+    .status-revision { color: var(--color-warning); background: var(--color-warning-bg); }
+    .status-locked { color: #4c6ef5; background: rgba(76,110,245,.08); }
+
+    .modal-overlay {
+      position: absolute;
+      inset: -20px -24px;
+      background: rgba(0,0,0,.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 20;
+    }
+
+    .modal-container {
+      background: #fff;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 1120px;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 48px rgba(0,0,0,.2);
+      overflow: hidden;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      border-bottom: 1px solid #e4e7ec;
+      flex-shrink: 0;
+    }
+
+    .modal-title { font-size: 15px; font-weight: 600; color: #1a1a2e; }
+    .modal-body { flex: 1; overflow: auto; padding: 20px; min-height: 0; }
+
+    .info-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding: 12px 16px;
+      background: var(--color-gray-50);
+      border-radius: 8px;
+      font-size: .7rem;
+      flex-wrap: wrap;
+    }
+
+    .file-list { margin-bottom: 20px; }
+    .section-title { font-size: .75rem; font-weight: 600; margin-bottom: 8px; color: var(--color-gray-600); }
+
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: var(--color-gray-50);
+      border-radius: 6px;
+      font-size: .68rem;
+      margin-bottom: 4px;
+    }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #2f9e44; flex-shrink: 0; }
+    .issue-summary { display: flex; align-items: center; gap: 8px; font-size: .64rem; font-weight: 400; }
+
+    .issue-table-wrap {
+      border: 1px solid var(--color-gray-200);
+      border-radius: 8px;
+      overflow: auto;
+      max-height: 260px;
+      background: #fff;
+    }
+
+    table { width: 100%; border-collapse: collapse; min-width: 980px; font-size: .68rem; }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      text-align: left;
+      padding: 9px 10px;
+      background: #f8fafc;
+      color: var(--color-gray-500);
+      border-bottom: 1px solid var(--color-gray-200);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    td { padding: 10px; border-bottom: 1px solid var(--color-gray-100); color: var(--color-gray-700); vertical-align: top; }
+    tr.issue-critical { border-left: 3px solid #e74c3c; }
+    tr.issue-warning { border-left: 3px solid #f39c12; }
+    .sev { font-size: .58rem; padding: 1px 6px; border-radius: 4px; font-weight: 700; color: #fff; }
+    .sev.critical { background: #e74c3c; }
+    .sev.warning { background: #f39c12; }
+    .cat { font-size: .6rem; padding: 2px 7px; border-radius: 999px; color: var(--color-gray-500); background: var(--color-gray-100); font-weight: 700; white-space: nowrap; }
+
+    .revision-callout {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #fedf89;
+      background: var(--color-warning-bg);
+      color: #7a2e0e;
+      font-size: .72rem;
+      line-height: 1.6;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .jump-strip {
+      margin: 16px 0 0;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: var(--color-info-bg);
+      border: 1px solid #b2ddff;
+      color: var(--color-info);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: .72rem;
+      font-weight: 600;
+    }
+
+    .upload-page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 0 72px;
+    }
+
+    .upload-titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 42px;
+    }
+
+    .upload-titlebar h2 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .pill {
+      font-size: .7rem;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 18px;
+      background: var(--color-warning-bg);
+      color: var(--color-warning);
+    }
+
+    .set-id-pill {
+      font-size: .73rem;
+      color: #94a3b8;
+      background: #fff;
+      padding: 5px 12px;
+      border-radius: 7px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .group-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 38px;
+    }
+
+    .chip {
+      font-size: .7rem;
+      padding: 6px 16px;
+      border-radius: 22px;
+      border: 1.5px solid #4f46e5;
+      background: #eef2ff;
+      color: #4f46e5;
+      font-weight: 600;
+    }
+
+    .steps {
+      display: flex;
+      margin-bottom: 42px;
+      background: #fff;
+      border-radius: 16px;
+      padding: 6px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    }
+
+    .step {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 22px;
+      border-radius: 12px;
+    }
+
+    .step.done { background: #f0fdf4; }
+    .step.active { background: #eef2ff; }
+    .step-num {
+      width: 40px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: .85rem;
+      flex-shrink: 0;
+      color: #fff;
+    }
+    .step.done .step-num { background: #16a34a; }
+    .step.active .step-num { background: #4f46e5; }
+    .step.pending .step-num { background: #f1f5f9; color: #94a3b8; }
+    .step-title { font-weight: 700; font-size: .85rem; color: #334155; }
+    .step.done .step-title { color: #16a34a; }
+    .step.active .step-title { color: #4f46e5; }
+    .step-sub { font-size: .68rem; color: #94a3b8; margin-top: 1px; }
+
+    .upload-section {
+      background: #fff;
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04);
+      margin-bottom: 30px;
+    }
+
+    .upload-section-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 30px;
+    }
+
+    .upload-section-head h2 { font-size: 1.05rem; font-weight: 700; color: #0f172a; }
+    .upload-section-head span { font-size: .75rem; color: #94a3b8; }
+
+    .doc-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+    }
+
+    .doc-card {
+      border-radius: 14px;
+      padding: 28px 18px 22px;
+      text-align: center;
+      position: relative;
+      min-height: 210px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #f0fdf4;
+      border: 2px solid #bbf7d0;
+    }
+
+    .doc-card.changed {
+      background: #fffbeb;
+      border-color: #fde68a;
+    }
+
+    .doc-card.extracting {
+      background: #eef2ff;
+      border-color: #c7d2fe;
+    }
+
+    .card-dot {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #16a34a;
+    }
+
+    .doc-card.changed .card-dot { background: #f59e0b; }
+    .doc-card.extracting .card-dot { background: #f59e0b; }
+
+    .required {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: .55rem;
+      padding: 3px 8px;
+      border-radius: 10px;
+      font-weight: 700;
+      background: #fef2f2;
+      color: #dc2626;
+    }
+
+    .optional { background: #f1f5f9; color: #64748b; }
+
+    .doc-icon {
+      width: 50px;
+      height: 50px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      background: #eef2ff;
+      color: #4f46e5;
+    }
+
+    .doc-icon.green { background: #f0fdf4; color: #16a34a; }
+    .doc-icon.orange { background: #fff7ed; color: #ea580c; }
+    .doc-icon.gray { background: #f1f5f9; color: #64748b; }
+
+    .doc-label { font-weight: 700; font-size: .8rem; margin-bottom: 3px; color: #1e293b; }
+    .doc-meta { font-size: .64rem; color: #94a3b8; }
+    .doc-filename { font-size: .62rem; color: #64748b; margin-top: 5px; word-break: break-all; line-height: 1.4; width: 100%; min-width: 0; }
+    .doc-status { margin-top: 10px; display: inline-flex; align-items: center; gap: 4px; color: #16a34a; font-size: .66rem; font-weight: 600; }
+    .doc-card.changed .doc-status { color: #f59e0b; }
+    .doc-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+
+    .progress-box {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 24px;
+      padding: 18px 24px;
+      border-radius: 14px;
+      background: #f0fdf4;
+      border: 1.5px solid #bbf7d0;
+    }
+
+    .progress-box span { font-size: .75rem; color: #16a34a; flex: 1; font-weight: 600; }
+
+    .previous-review-head {
+      padding: 16px 22px;
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .previous-review-title {
+      font-weight: 700;
+      font-size: .9rem;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .previous-review-meta {
+      font-size: .66rem;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    .issue-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 18px;
+      border-bottom: 1px solid #f1f5f9;
+      background: #fff;
+      flex-wrap: wrap;
+    }
+
+    .issue-filter {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #e2e8f0;
+      background: #fff;
+      color: #64748b;
+      font-size: .62rem;
+      font-weight: 700;
+    }
+
+    .issue-filter.active {
+      background: #eef2ff;
+      border-color: #c7d2fe;
+      color: #4f46e5;
+    }
+
+    .issue-impact {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: .58rem;
+      padding: 2px 7px;
+      border-radius: 999px;
+      color: #b54708;
+      background: #fffaeb;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .issue-action-cell {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .flow-caption {
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: #fff;
+      border: 1px solid var(--color-gray-200);
+      color: var(--color-gray-600);
+      font-size: .74rem;
+      line-height: 1.6;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    }
+
+    .flow-caption strong { color: var(--color-primary); }
+
+    @media (max-width: 1120px) {
+      .app-side { width: 56px; }
+      .side-logo-text, .side-label, .side-user-info { display: none; }
+      .doc-grid { grid-template-columns: repeat(2, 1fr); }
+      .steps { flex-direction: column; }
+      .set-row, .set-head { grid-template-columns: 1fr 70px 80px; }
+      .set-row span:last-child, .set-head span:last-child { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-note">UX 静态预览 · 复用现有前端视觉，不含业务代码</div>
+
+  <div class="app-layout">
+    <aside class="app-side">
+      <div class="side-logo">
+        <span class="side-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </span>
+        <span class="side-logo-text">EMC报告审核</span>
+      </div>
+      <nav class="side-nav">
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="2" width="16" height="16" rx="2" fill="currentColor" opacity=".15"/><polyline points="16 10 12 6 8 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="6" x2="12" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="side-label">上传审核</span></button>
+        <button class="side-item side-item-on"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6c0-1.1.9-2 2-2z" fill="currentColor" opacity=".12" stroke="currentColor" stroke-width="1.5"/><polyline points="9 12 11 14 15 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="side-label">我的报告</span></button>
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="14" width="4" height="7" rx="1" fill="currentColor" opacity=".3"/><rect x="10" y="9" width="4" height="12" rx="1" fill="currentColor" opacity=".55"/><rect x="17" y="4" width="4" height="17" rx="1" fill="currentColor"/></svg></span><span class="side-label">统计仪表盘</span></button>
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><circle cx="8" cy="7" r="3.5" fill="currentColor" opacity=".3"/><circle cx="16" cy="7" r="2.5" fill="currentColor" opacity=".55"/><path d="M2 20v-1a5 5 0 015-5h2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M16 14h2.5a5 5 0 015 5v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="side-label">项目组</span></button>
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><circle cx="9" cy="9" r="3" fill="currentColor" opacity=".25"/><circle cx="16" cy="9" r="2.5" fill="currentColor" opacity=".45"/><circle cx="12" cy="16" r="4" fill="currentColor" opacity=".7"/></svg></span><span class="side-label">审核配置</span></button>
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="5" y="3" width="14" height="18" rx="2" fill="currentColor" opacity=".12" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="12" x2="13" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="side-label">标准库</span></button>
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="3" width="16" height="18" rx="2" fill="currentColor" opacity=".12" stroke="currentColor" stroke-width="1.5"/><polyline points="8 9 11 12 16 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="8" y1="16" x2="16" y2="16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="side-label">审核报告</span></button>
+      </nav>
+      <div class="side-user"><span class="side-avatar">E</span><div class="side-user-info"><span class="side-user-name">Ethan</span><span class="side-user-role">审核员</span></div></div>
+    </aside>
+
+    <main class="app-main">
+      <div class="main-topbar">我的报告</div>
+      <div class="main-content">
+        <div class="history-page">
+          <div class="flow-caption">
+            <strong>流程位置 1：</strong>用户仍然从“我的报告”进入已审核文档集。这里不新增上传区，只新增“创建修订并去替换文件”的明确动作。
+          </div>
+
+          <div class="page-head">
+            <div>
+              <h2>全部报告</h2>
+              <p>报告审核文档集历史记录</p>
+            </div>
+            <button class="filter-btn">刷新</button>
+          </div>
+
+          <div class="set-table">
+            <div class="set-row set-head"><span>文档集 ID</span><span>文档数</span><span>状态</span><span>创建时间</span></div>
+            <div class="set-row" style="background: var(--color-gray-50);">
+              <span class="mono" style="font-size:.66rem;color:var(--color-gray-600);">EMC-20260708-m3aa88</span>
+              <span style="color:var(--color-gray-500);">4</span>
+              <span class="status-badge status-reviewed">已审核</span>
+              <span style="color:var(--color-gray-400);font-size:.66rem;">2026-07-08 19:13:58</span>
+            </div>
+            <div class="set-row">
+              <span class="mono" style="font-size:.66rem;color:var(--color-gray-600);">EMC-20260707-p8k21c</span>
+              <span style="color:var(--color-gray-500);">4</span>
+              <span class="status-badge status-reviewed">已审核</span>
+              <span style="color:var(--color-gray-400);font-size:.66rem;">2026-07-07 16:02:10</span>
+            </div>
+          </div>
+
+          <div class="modal-overlay">
+            <div class="modal-container">
+              <div class="modal-header">
+                <span class="modal-title">文档集详情</span>
+                <span style="font-size:20px;color:#667085;">✕</span>
+              </div>
+              <div class="modal-body">
+                <div class="info-bar">
+                  <span class="mono" style="color:var(--color-gray-500);">EMC-20260708-m3aa88</span>
+                  <span class="status-badge status-reviewed">已审核</span>
+                  <span style="color:var(--color-gray-400);">2026-07-08 19:13:58</span>
+                  <span style="color:var(--color-gray-400);">4 个文件</span>
+                  <span style="margin-left:auto;display:flex;gap:8px;">
+                    <button class="pg-btn">导出上次审核报告</button>
+                    <button class="pg-btn primary">创建修订并去替换文件</button>
+                  </span>
+                </div>
+
+                <div class="revision-callout">
+                  <div>
+                    当前文档集已经完成审核，文件清单和问题明细保持只读。点击右侧按钮后，系统创建修订草稿并跳转到“报告审核”Tab，用户在那里替换修改后的文件。
+                  </div>
+                  <button class="pg-btn primary">去报告审核替换</button>
+                </div>
+
+                <div class="file-list">
+                  <div class="section-title">文件清单</div>
+                  <div class="file-item"><span class="dot"></span><span style="font-weight:600;color:var(--color-gray-600);min-width:80px;">委托单</span><span style="color:var(--color-gray-500);flex:1;">E20260402869601委托单.xls</span><span style="color:var(--color-gray-400);font-size:.62rem;">已提取</span></div>
+                  <div class="file-item"><span class="dot"></span><span style="font-weight:600;color:var(--color-gray-600);min-width:80px;">试验计划</span><span style="color:var(--color-gray-500);flex:1;">E20260402869601测试计划.pdf</span><span style="color:var(--color-gray-400);font-size:.62rem;">已提取</span></div>
+                  <div class="file-item"><span class="dot"></span><span style="font-weight:600;color:var(--color-gray-600);min-width:80px;">全套原始记录</span><span style="color:var(--color-gray-500);flex:1;">E20260402869601原始记录.zip</span><span style="color:var(--color-gray-400);font-size:.62rem;">已提取</span></div>
+                  <div class="file-item"><span class="dot"></span><span style="font-weight:600;color:var(--color-gray-600);min-width:80px;">最终检测报告</span><span style="color:var(--color-gray-500);flex:1;">E20260402869601-1正式报告.pdf</span><span style="color:var(--color-gray-400);font-size:.62rem;">已提取</span></div>
+                </div>
+
+                <div>
+                  <div class="section-title" style="display:flex;align-items:center;gap:8px;">
+                    交叉验证结果
+                    <span class="issue-summary">
+                      <span>72 条问题明细</span>
+                      <span style="color:var(--color-gray-400);">5 类问题</span>
+                      <span style="color:#e74c3c;">19 严重</span>
+                      <span style="color:#f39c12;">43 警告</span>
+                    </span>
+                  </div>
+                  <div class="issue-table-wrap">
+                    <table>
+                      <thead><tr><th>序号</th><th>级别</th><th>问题类别</th><th>问题描述</th><th>人工状态</th></tr></thead>
+                      <tbody>
+                        <tr class="issue-critical"><td style="width:56px;color:var(--color-gray-400);">1</td><td style="width:76px;"><span class="sev critical">严重</span></td><td style="width:130px;"><span class="cat">覆盖完整性</span></td><td><div style="font-weight:700;color:var(--color-gray-400);margin-bottom:4px;">EQIC02 <span style="font-size:.56rem;color:#e74c3c;">不一致</span></div><div>计划要求执行 EQIC02，原始记录未找到；报告目录中也未出现</div></td><td style="width:198px;"><button class="pg-btn primary">待处理</button> <button class="pg-btn">已确认</button> <button class="pg-btn">已忽略</button></td></tr>
+                        <tr class="issue-critical"><td style="color:var(--color-gray-400);">2</td><td><span class="sev critical">严重</span></td><td><span class="cat">覆盖完整性</span></td><td><div style="font-weight:700;color:var(--color-gray-400);margin-bottom:4px;">EQIC05 <span style="font-size:.56rem;color:#e74c3c;">不一致</span></div><div>计划要求执行 EQIC05，原始记录未找到；报告目录中也未出现</div></td><td><button class="pg-btn primary">待处理</button> <button class="pg-btn">已确认</button> <button class="pg-btn">已忽略</button></td></tr>
+                        <tr class="issue-warning"><td style="color:var(--color-gray-400);">3</td><td><span class="sev warning">警告</span></td><td><span class="cat">测试方法</span></td><td><div style="font-weight:700;color:var(--color-gray-400);margin-bottom:4px;">测试等级</div><div>测试报告与原始记录中的等级描述不完全一致，需要人工确认</div></td><td><button class="pg-btn primary">待处理</button> <button class="pg-btn">已确认</button> <button class="pg-btn">已忽略</button></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="jump-strip">
+                  <span>点击“创建修订并去替换文件”后，左侧导航切到“上传审核”，并自动载入 EMC-20260708-m3aa88 的修订草稿。</span>
+                  <button class="pg-btn primary">创建修订</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:28px;"></div>
+
+        <div class="flow-caption">
+          <strong>流程位置 2：</strong>创建修订后跳回“上传审核/报告审核”主界面。这里复用现有文档卡片、核查按钮、替换按钮、历史版本按钮和提交审核区域。
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="app-layout" style="height:auto;min-height:100vh;border-top:1px solid #d0d5dd;">
+    <aside class="app-side">
+      <div class="side-logo">
+        <span class="side-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>
+        <span class="side-logo-text">EMC报告审核</span>
+      </div>
+      <nav class="side-nav">
+        <button class="side-item side-item-on"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="2" width="16" height="16" rx="2" fill="currentColor" opacity=".15"/><polyline points="16 10 12 6 8 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="6" x2="12" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="side-label">报告审核</span></button>
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6c0-1.1.9-2 2-2z" fill="currentColor" opacity=".12" stroke="currentColor" stroke-width="1.5"/><polyline points="9 12 11 14 15 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="side-label">我的报告</span></button>
+        <button class="side-item"><span class="side-icon"><svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="14" width="4" height="7" rx="1" fill="currentColor" opacity=".3"/><rect x="10" y="9" width="4" height="12" rx="1" fill="currentColor" opacity=".55"/><rect x="17" y="4" width="4" height="17" rx="1" fill="currentColor"/></svg></span><span class="side-label">统计仪表盘</span></button>
+      </nav>
+      <div class="side-user"><span class="side-avatar">E</span><div class="side-user-info"><span class="side-user-name">Ethan</span><span class="side-user-role">审核员</span></div></div>
+    </aside>
+
+    <main class="app-main" style="min-height:100vh;">
+      <div class="main-topbar">报告审核</div>
+      <div class="main-content">
+        <div class="upload-page">
+          <div class="upload-titlebar">
+            <h2>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              报告审核
+              <span class="pill">修订中</span>
+            </h2>
+            <span class="set-id-pill mono">EMC-20260708-m3aa88</span>
+          </div>
+
+          <div class="revision-callout" style="margin-bottom:30px;">
+            <div>
+              已从“我的报告”创建修订。上一轮审核结果已带入当前页面；请对照问题明细替换修改后的文件，完成提取与核查后重新提交审核。
+            </div>
+            <button class="pg-btn">返回我的报告</button>
+          </div>
+
+          <div class="upload-section" style="padding:0;overflow:hidden;">
+            <div class="previous-review-head">
+              <div>
+                <div class="previous-review-title">
+                  上一轮审核问题明细
+                  <span class="status-badge status-reviewed">第 1 轮</span>
+                  <span style="font-size:.64rem;color:#e74c3c;font-weight:700;">19 严重</span>
+                  <span style="font-size:.64rem;color:#f39c12;font-weight:700;">43 警告</span>
+                </div>
+                <div class="previous-review-meta">72 条问题明细 · 5 类问题 · 2026-07-08 19:38:57 · 重新审核完成前保留为参考</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button class="pg-btn">导出上一轮</button>
+                <button class="pg-btn primary">只看待修复</button>
+              </div>
+            </div>
+
+            <div class="issue-toolbar">
+              <span class="issue-filter active">全部 72</span>
+              <span class="issue-filter">严重 19</span>
+              <span class="issue-filter">警告 43</span>
+              <span class="issue-filter">覆盖完整性</span>
+              <span class="issue-filter">测试方法</span>
+              <span style="margin-left:auto;font-size:.62rem;color:#94a3b8;">点击“去替换”会定位到对应文件卡片</span>
+            </div>
+
+            <div style="padding:0 18px 18px;">
+              <div class="issue-table-wrap" style="max-height:360px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>序号</th>
+                      <th>级别</th>
+                      <th>问题类别</th>
+                      <th>问题描述</th>
+                      <th>建议处理</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="issue-critical">
+                      <td style="width:56px;color:var(--color-gray-400);">1</td>
+                      <td style="width:76px;"><span class="sev critical">严重</span></td>
+                      <td style="width:130px;"><span class="cat">覆盖完整性</span></td>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+                          <strong style="color:var(--color-gray-400);">EQIC02</strong>
+                          <span style="font-size:.56rem;color:#e74c3c;font-weight:700;">不一致</span>
+                          <span class="issue-impact">影响试验计划 / 原始记录 / 检测报告</span>
+                        </div>
+                        <div>计划要求执行 EQIC02（抗脉冲3A和3B的性能），原始记录未找到；报告目录中也未出现</div>
+                      </td>
+                      <td style="width:220px;">
+                        <div class="issue-action-cell">
+                          <button class="pg-btn warning">去替换试验计划</button>
+                          <button class="pg-btn">标记已处理</button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="issue-critical">
+                      <td style="color:var(--color-gray-400);">2</td>
+                      <td><span class="sev critical">严重</span></td>
+                      <td><span class="cat">覆盖完整性</span></td>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+                          <strong style="color:var(--color-gray-400);">EQIC05</strong>
+                          <span style="font-size:.56rem;color:#e74c3c;font-weight:700;">不一致</span>
+                          <span class="issue-impact">影响试验计划 / 原始记录</span>
+                        </div>
+                        <div>计划要求执行 EQIC05（抗脉冲4或4BIS的性能），原始记录未找到；报告目录中也未出现</div>
+                      </td>
+                      <td>
+                        <div class="issue-action-cell">
+                          <button class="pg-btn warning">去替换原始记录</button>
+                          <button class="pg-btn">标记已处理</button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="issue-critical">
+                      <td style="color:var(--color-gray-400);">3</td>
+                      <td><span class="sev critical">严重</span></td>
+                      <td><span class="cat">覆盖完整性</span></td>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+                          <strong style="color:var(--color-gray-400);">EQIC09</strong>
+                          <span style="font-size:.56rem;color:#e74c3c;font-weight:700;">不一致</span>
+                          <span class="issue-impact">影响试验计划 / 检测报告</span>
+                        </div>
+                        <div>计划要求执行 EQIC09（抗高低压点火的抗干扰性能），原始记录未找到；报告目录中也未出现</div>
+                      </td>
+                      <td>
+                        <div class="issue-action-cell">
+                          <button class="pg-btn warning">去替换检测报告</button>
+                          <button class="pg-btn">标记已处理</button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="issue-warning">
+                      <td style="color:var(--color-gray-400);">4</td>
+                      <td><span class="sev warning">警告</span></td>
+                      <td><span class="cat">测试方法</span></td>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+                          <strong style="color:var(--color-gray-400);">测试等级</strong>
+                          <span style="font-size:.56rem;color:#f39c12;font-weight:700;">需确认</span>
+                          <span class="issue-impact">影响检测报告</span>
+                        </div>
+                        <div>测试报告与原始记录中的等级描述不完全一致，需要人工确认是否应修订报告描述</div>
+                      </td>
+                      <td>
+                        <div class="issue-action-cell">
+                          <button class="pg-btn warning">去替换检测报告</button>
+                          <button class="pg-btn">忽略</button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="issue-warning">
+                      <td style="color:var(--color-gray-400);">5</td>
+                      <td><span class="sev warning">警告</span></td>
+                      <td><span class="cat">基础信息</span></td>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+                          <strong style="color:var(--color-gray-400);">封面额定电压</strong>
+                          <span style="font-size:.56rem;color:#f39c12;font-weight:700;">不一致</span>
+                          <span class="issue-impact">影响委托单 / 检测报告</span>
+                        </div>
+                        <div>检测报告封面的额定电压与委托单记录不一致，需要确认是否修改报告封面或委托单信息</div>
+                      </td>
+                      <td>
+                        <div class="issue-action-cell">
+                          <button class="pg-btn warning">去替换委托单</button>
+                          <button class="pg-btn">标记已处理</button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="group-row">
+            <span style="font-size:.78rem;font-weight:600;color:#64748b;white-space:nowrap;">项目组</span>
+            <span class="chip">廣電 DVP</span>
+            <span style="font-size:.7rem;color:#94a3b8;">沿用上一轮文档集信息</span>
+          </div>
+
+          <div class="steps">
+            <div class="step done"><div class="step-num">✓</div><div><div class="step-title">替换文档</div><div class="step-sub">沿用 4 必传 + 1 选传</div></div></div>
+            <div class="step active"><div class="step-num">2</div><div><div class="step-title">核查提取结果</div><div class="step-sub">只需核查被替换文件</div></div></div>
+            <div class="step pending"><div class="step-num">3</div><div><div class="step-title">重新交叉审核</div><div class="step-sub">生成第 2 轮问题明细</div></div></div>
+          </div>
+
+          <div class="upload-section">
+            <div class="upload-section-head">
+              <h2>上传文档</h2>
+              <span>当前为修订草稿，替换动作会生成新版本，不覆盖上一轮审核文件</span>
+            </div>
+
+            <div class="doc-grid">
+              <div class="doc-card">
+                <span class="card-dot"></span><span class="required">必传</span>
+                <div class="doc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="7" y1="9" x2="17" y2="9" opacity=".5"/><line x1="7" y1="12" x2="14" y2="12" opacity=".3"/></svg></div>
+                <div class="doc-label">委托单</div>
+                <div class="doc-meta">218KB · v1</div>
+                <div class="doc-filename">E20260402869601委托单.xls</div>
+                <div class="doc-status">✓ 提取完成 · 已核查</div>
+                <div class="doc-actions"><button class="pg-btn primary">核查</button><button class="pg-btn">替换</button><button class="pg-btn">历史版本</button></div>
+              </div>
+
+              <div class="doc-card changed">
+                <span class="card-dot"></span><span class="required">必传</span>
+                <div class="doc-icon green"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="7" y="8" width="4" height="4" rx="1" opacity=".5"/><line x1="13" y1="10" x2="17" y2="10" opacity=".3"/></svg></div>
+                <div class="doc-label">试验计划</div>
+                <div class="doc-meta">394KB · v2</div>
+                <div class="doc-filename">廣電 DVP test Second Round.xlsx</div>
+                <div class="doc-status">✓ 重新提取完成 · 待核查</div>
+                <div class="doc-actions"><button class="pg-btn primary">核查</button><button class="pg-btn warning">再次替换</button><button class="pg-btn">历史版本</button></div>
+              </div>
+
+              <div class="doc-card">
+                <span class="card-dot"></span><span class="required">必传</span>
+                <div class="doc-icon orange"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20" opacity=".5"/><rect x="6" y="13" width="12" height="4" rx="1" stroke-dasharray="1.5,1.5" opacity=".4"/></svg></div>
+                <div class="doc-label">原始记录</div>
+                <div class="doc-meta">3.6MB · v1</div>
+                <div class="doc-filename">E20260402869601原始记录.zip</div>
+                <div class="doc-status">✓ 提取完成 · 已核查</div>
+                <div class="doc-actions"><button class="pg-btn primary">核查</button><button class="pg-btn">替换</button><button class="pg-btn">历史版本</button></div>
+              </div>
+
+              <div class="doc-card">
+                <span class="card-dot"></span><span class="required">必传</span>
+                <div class="doc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="2" width="16" height="20" rx="2"/><polyline points="8 12 11 16 16 8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div class="doc-label">检测报告</div>
+                <div class="doc-meta">1.1MB · v1</div>
+                <div class="doc-filename">E20260402869601-1正式报告.pdf</div>
+                <div class="doc-status">✓ 提取完成 · 已核查</div>
+                <div class="doc-actions"><button class="pg-btn primary">核查</button><button class="pg-btn">替换</button><button class="pg-btn">历史版本</button></div>
+              </div>
+
+              <div class="doc-card extracting">
+                <span class="card-dot"></span><span class="required optional">选传</span>
+                <div class="doc-icon gray"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16v16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path d="M4 4l3-2h10l3 2"/></svg></div>
+                <div class="doc-label">测试标准</div>
+                <div class="doc-meta">PDF / DOCX</div>
+                <div class="doc-filename">未上传，沿用空状态</div>
+                <div class="doc-status">点击上传</div>
+                <div class="doc-actions"><button class="pg-btn">上传</button></div>
+              </div>
+            </div>
+
+            <div class="progress-box">
+              <span>4/4 必传文件已就绪 · 其中 1 个文件已替换为新版本 · 请核查被替换文件后提交重新审核</span>
+              <button class="pg-add-btn">重新提交审核</button>
+            </div>
+          </div>
+
+          <div class="upload-section" style="padding:0;overflow:hidden;">
+            <div style="padding:16px 22px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-weight:700;font-size:.9rem;">重新审核完成后的展示</span>
+              <span style="font-size:.68rem;color:#94a3b8;">第 2 轮结果会成为当前结果，第 1 轮可回看</span>
+            </div>
+            <div style="padding:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+              <div style="text-align:center;padding:14px 10px;border-radius:12px;background:#f8fafc;"><div style="font-size:1.6rem;font-weight:700;color:#dc2626;">8</div><div style="font-size:.64rem;color:#64748b;margin-top:4px;font-weight:600;">严重 CRITICAL</div></div>
+              <div style="text-align:center;padding:14px 10px;border-radius:12px;background:#f8fafc;"><div style="font-size:1.6rem;font-weight:700;color:#f59e0b;">12</div><div style="font-size:.64rem;color:#64748b;margin-top:4px;font-weight:600;">警告 WARNING</div></div>
+              <div style="text-align:center;padding:14px 10px;border-radius:12px;background:#f8fafc;"><div style="font-size:1.6rem;font-weight:700;color:#4f46e5;">3</div><div style="font-size:.64rem;color:#64748b;margin-top:4px;font-weight:600;">提示 INFO</div></div>
+              <div style="text-align:center;padding:14px 10px;border-radius:12px;background:#f8fafc;"><div style="font-size:1.6rem;font-weight:700;color:#16a34a;">4</div><div style="font-size:.64rem;color:#64748b;margin-top:4px;font-weight:600;">问题类别</div></div>
+            </div>
+            <div style="padding:0 18px 18px;">
+              <div class="issue-table-wrap" style="max-height:none;">
+                <table>
+                  <thead><tr><th>审核轮次</th><th>使用版本</th><th>结果</th><th>时间</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr><td style="font-weight:700;">第 2 轮</td><td>委托单 v1、试验计划 v2、原始记录 v1、检测报告 v1</td><td><span class="status-badge status-revision">23 条问题明细</span></td><td style="color:var(--color-gray-400);">2026-07-09 10:24:18</td><td><button class="pg-btn primary">查看当前结果</button> <button class="pg-btn">导出</button></td></tr>
+                    <tr><td style="font-weight:700;">第 1 轮</td><td>委托单 v1、试验计划 v1、原始记录 v1、检测报告 v1</td><td><span class="status-badge status-reviewed">72 条问题明细</span></td><td style="color:var(--color-gray-400);">2026-07-08 19:38:57</td><td><button class="pg-btn">查看历史结果</button> <button class="pg-btn">导出</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brand Icon 精选对比 — EMC 报告审核系统</title>
+<style>
+  :root {
+    --bg: #f7f8f6; --card: #fff; --ink: #1a1f1c; --muted: #6b7570;
+    --faint: #a3ada8; --line: #e3e7e4;
+    --evidence: #1f7c70; --lab: #3e7185;
+    --t1: #1f7c70; --t2: #3e7185; --t3: #c84d3f; --t4: #e28a3b; --t5: #755f93; --t6: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #141916; --card: #1c211e; --ink: #e8ece9; --muted: #8b948f; --faint: #5d6662; --line: #2a302c; }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 48px 32px 80px;
+  }
+  h1 { font: 600 clamp(28px,4vw,40px)/1.15 "Georgia",serif; letter-spacing: -.03em; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 40px; }
+
+  .candidates { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 48px; }
+  .cand-card {
+    flex: 1 1 240px; min-width: 220px; max-width: 300px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 28px 20px 22px; display: flex; flex-direction: column; align-items: center;
+    gap: 16px;
+  }
+  .cand-card .label { font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .cand-card h3 { font-size: 15px; font-weight: 700; }
+  .cand-card p { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.6; }
+
+  h2 { font-size: 18px; font-weight: 700; margin: 40px 0 20px; display: flex; align-items: center; gap: 10px; }
+  h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+  /* ---- App Header mock ---- */
+  .mock-header {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 20px; display: flex; align-items: center; gap: 16px; margin-bottom: 16px;
+  }
+  .mock-header .brand-row {
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+  }
+  .mock-header .brand-txt { display: flex; flex-direction: column; line-height: 1.3; }
+  .mock-header .brand-txt strong { font-size: 13px; }
+  .mock-header .brand-txt small { font-size: 9px; letter-spacing: .1em; color: var(--faint); }
+
+  /* ---- Login page mock ---- */
+  .mock-login-wrap { background: linear-gradient(135deg, #0f1d1a 0%, #152522 40%, #1a2e2a 100%); border-radius: 12px; padding: 36px 32px; }
+  .mock-login-row { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  .mock-login-row .brand-txt { display: flex; flex-direction: column; line-height: 1.3; }
+  .mock-login-row .brand-txt strong { font-size: 15px; color: #fff; }
+  .mock-login-row .brand-txt small { font-size: 9px; letter-spacing: .1em; color: rgba(255,255,255,.45); }
+  .mock-login-hero { margin-top: 18px; }
+  .mock-login-hero span { font-size: 10px; letter-spacing: .14em; color: rgba(255,255,255,.4); }
+  .mock-login-hero h1 { font-size: 26px; color: #fff; font-weight: 700; margin: 8px 0; line-height: 1.3; }
+  .mock-login-hero p { font-size: 12px; color: rgba(255,255,255,.55); max-width: 360px; }
+
+  .row-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row-grid .cand-card { flex: 1 1 240px; min-width: 220px; }
+</style>
+</head>
+<body>
+
+<h1>精选对比 · 4 方案</h1>
+<p class="sub">04 · 柱形进化 &nbsp;|&nbsp; 06 · 信号校验 &nbsp;|&nbsp; 10 · 展卷 &nbsp;|&nbsp; 14 · 棋盘盾</p>
+
+<!-- ===== Large stand-alone icons ===== -->
+<h2>独立效果（56px）</h2>
+<div class="candidates">
+  <div class="cand-card"><div class="label">04 · 柱形进化</div>
+    <svg width="56" height="56" viewBox="0 0 48 48" fill="none">
+      <rect x="6" y="22" width="5" height="8" rx="1.5" fill="var(--ink)" opacity=".35"/>
+      <rect x="13" y="16" width="5" height="14" rx="1.5" fill="var(--ink)" opacity=".55"/>
+      <rect x="20" y="10" width="5" height="20" rx="1.5" fill="var(--ink)" opacity=".8"/>
+      <rect x="27" y="5" width="7" height="25" rx="1.5" fill="var(--t1)"/>
+      <rect x="36" y="14" width="5" height="16" rx="1.5" fill="var(--t2)" opacity=".7"/>
+      <path d="M32 26 l3-2.5 3 3" stroke="var(--t2)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h3>柱形进化</h3><p>五柱递增，双色填充，趋势箭头</p>
+  </div>
+  <div class="cand-card"><div class="label">06 · 信号校验</div>
+    <svg width="56" height="56" viewBox="0 0 48 48" fill="none">
+      <rect x="10" y="14" width="22" height="24" rx="3" stroke="var(--ink)" stroke-width="2.2" fill="none"/>
+      <line x1="15" y1="21" x2="27" y2="21" stroke="var(--ink)" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+      <line x1="15" y1="26" x2="23" y2="26" stroke="var(--ink)" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+      <line x1="15" y1="31" x2="25" y2="31" stroke="var(--ink)" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+      <path d="M28 33 l2 2 4-5" stroke="var(--t1)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M32 4 Q38 11 36 18" stroke="var(--t2)" stroke-width="2.2" fill="none" stroke-linecap="round" opacity=".7"/>
+      <path d="M27 6 Q33 11 30 18" stroke="var(--t1)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    </svg>
+    <h3>信号校验</h3><p>报告文档 + EMC 信号波形，双色曲线</p>
+  </div>
+  <div class="cand-card"><div class="label">10 · 展卷</div>
+    <svg width="56" height="56" viewBox="0 0 48 48" fill="none">
+      <path d="M4 14 Q24 6 44 14 v26 Q24 34 24 38 Q24 34 4 42Z" stroke="var(--ink)" stroke-width="2.2" fill="var(--t4)" fill-opacity=".08" stroke-linejoin="round"/>
+      <path d="M24 14 v24" stroke="var(--ink)" stroke-width="1.5" opacity=".3"/>
+      <path d="M17 27 l2.5 2.5 5.5-6" stroke="var(--t1)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h3>展卷</h3><p>暖色底衬书页，中脊分隔，左页对勾</p>
+  </div>
+  <div class="cand-card"><div class="label">14 · 棋盘盾</div>
+    <svg width="56" height="56" viewBox="0 0 48 48" fill="none">
+      <rect x="6" y="4" width="36" height="40" rx="7" stroke="var(--ink)" stroke-width="2.2" fill="none"/>
+      <rect x="10" y="8" width="14" height="14" rx="1" fill="var(--t2)" opacity=".18"/>
+      <rect x="28" y="26" width="14" height="14" rx="1" fill="var(--t2)" opacity=".18"/>
+      <rect x="10" y="26" width="14" height="14" rx="1" fill="var(--t1)" opacity=".13"/>
+      <rect x="28" y="8" width="14" height="14" rx="1" fill="var(--t1)" opacity=".13"/>
+      <path d="M19.5 33.5 l2.5 2.5 6.5-8" stroke="var(--t3)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h3>棋盘盾</h3><p>四象限棋盘双色填底，红色粗对勾</p>
+  </div>
+</div>
+
+<!-- ===== App Header mocks ===== -->
+<h2>顶部导航栏效果（33px，浅色主题）</h2>
+<div class="row-grid">
+  <div class="cand-card"><div class="label">04 · 柱形进化</div>
+    <div class="mock-header" style="align-self:stretch;">
+      <div class="brand-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <rect x="6" y="22" width="5" height="8" rx="1.5" fill="currentColor" opacity=".35"/>
+          <rect x="13" y="16" width="5" height="14" rx="1.5" fill="currentColor" opacity=".55"/>
+          <rect x="20" y="10" width="5" height="20" rx="1.5" fill="currentColor" opacity=".8"/>
+          <rect x="27" y="5" width="7" height="25" rx="1.5" fill="var(--t1)"/>
+          <rect x="36" y="14" width="5" height="16" rx="1.5" fill="var(--t2)" opacity=".7"/>
+          <path d="M32 26 l3-2.5 3 3" stroke="var(--t2)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+    </div>
+  </div>
+  <div class="cand-card"><div class="label">06 · 信号校验</div>
+    <div class="mock-header" style="align-self:stretch;">
+      <div class="brand-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <rect x="10" y="14" width="22" height="24" rx="3" stroke="currentColor" stroke-width="2.2" fill="none"/>
+          <line x1="15" y1="21" x2="27" y2="21" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+          <line x1="15" y1="26" x2="23" y2="26" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+          <line x1="15" y1="31" x2="25" y2="31" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+          <path d="M28 33 l2 2 4-5" stroke="var(--t1)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M32 4 Q38 11 36 18" stroke="var(--t2)" stroke-width="2.2" fill="none" stroke-linecap="round" opacity=".7"/>
+          <path d="M27 6 Q33 11 30 18" stroke="var(--t1)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+    </div>
+  </div>
+  <div class="cand-card"><div class="label">10 · 展卷</div>
+    <div class="mock-header" style="align-self:stretch;">
+      <div class="brand-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <path d="M4 14 Q24 6 44 14 v26 Q24 34 24 38 Q24 34 4 42Z" stroke="currentColor" stroke-width="2.2" fill="var(--t4)" fill-opacity=".08" stroke-linejoin="round"/>
+          <path d="M24 14 v24" stroke="currentColor" stroke-width="1.5" opacity=".3"/>
+          <path d="M17 27 l2.5 2.5 5.5-6" stroke="var(--t1)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+    </div>
+  </div>
+  <div class="cand-card"><div class="label">14 · 棋盘盾</div>
+    <div class="mock-header" style="align-self:stretch;">
+      <div class="brand-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <rect x="6" y="4" width="36" height="40" rx="7" stroke="currentColor" stroke-width="2.2" fill="none"/>
+          <rect x="10" y="8" width="14" height="14" rx="1" fill="var(--t2)" opacity=".18"/>
+          <rect x="28" y="26" width="14" height="14" rx="1" fill="var(--t2)" opacity=".18"/>
+          <rect x="10" y="26" width="14" height="14" rx="1" fill="var(--t1)" opacity=".13"/>
+          <rect x="28" y="8" width="14" height="14" rx="1" fill="var(--t1)" opacity=".13"/>
+          <path d="M19.5 33.5 l2.5 2.5 6.5-8" stroke="var(--t3)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Login page mocks ===== -->
+<h2>登录页效果（白色描边，深色背景）</h2>
+<div class="row-grid">
+  <div class="cand-card" style="max-width:340px;"><div class="label">04 · 柱形进化</div>
+    <div class="mock-login-wrap">
+      <div class="mock-login-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <rect x="6" y="22" width="5" height="8" rx="1.5" fill="#fff" opacity=".35"/>
+          <rect x="13" y="16" width="5" height="14" rx="1.5" fill="#fff" opacity=".55"/>
+          <rect x="20" y="10" width="5" height="20" rx="1.5" fill="#fff" opacity=".8"/>
+          <rect x="27" y="5" width="7" height="25" rx="1.5" fill="var(--evidence)"/>
+          <rect x="36" y="14" width="5" height="16" rx="1.5" fill="var(--lab)" opacity=".7"/>
+          <path d="M32 26 l3-2.5 3 3" stroke="var(--lab)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+      <div class="mock-login-hero"><span>QUALITY / TRACEABILITY / DECISION</span><h1>每一个结论，<br>都回到原文。</h1><p>在四份资料之间建立可追溯证据链。机器负责发现矛盾，审核员掌握最终判断。</p></div>
+    </div>
+  </div>
+  <div class="cand-card" style="max-width:340px;"><div class="label">06 · 信号校验</div>
+    <div class="mock-login-wrap">
+      <div class="mock-login-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <rect x="10" y="14" width="22" height="24" rx="3" stroke="#fff" stroke-width="2.2" fill="none"/>
+          <line x1="15" y1="21" x2="27" y2="21" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+          <line x1="15" y1="26" x2="23" y2="26" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+          <line x1="15" y1="31" x2="25" y2="31" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>
+          <path d="M28 33 l2 2 4-5" stroke="var(--evidence)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M32 4 Q38 11 36 18" stroke="var(--lab)" stroke-width="2.2" fill="none" stroke-linecap="round" opacity=".7"/>
+          <path d="M27 6 Q33 11 30 18" stroke="var(--evidence)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+      <div class="mock-login-hero"><span>QUALITY / TRACEABILITY / DECISION</span><h1>每一个结论，<br>都回到原文。</h1><p>在四份资料之间建立可追溯证据链。机器负责发现矛盾，审核员掌握最终判断。</p></div>
+    </div>
+  </div>
+  <div class="cand-card" style="max-width:340px;"><div class="label">10 · 展卷</div>
+    <div class="mock-login-wrap">
+      <div class="mock-login-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <path d="M4 14 Q24 6 44 14 v26 Q24 34 24 38 Q24 34 4 42Z" stroke="#fff" stroke-width="2.2" fill="rgba(255,255,255,.06)" stroke-linejoin="round"/>
+          <path d="M24 14 v24" stroke="#fff" stroke-width="1.5" opacity=".3"/>
+          <path d="M17 27 l2.5 2.5 5.5-6" stroke="var(--evidence)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+      <div class="mock-login-hero"><span>QUALITY / TRACEABILITY / DECISION</span><h1>每一个结论，<br>都回到原文。</h1><p>在四份资料之间建立可追溯证据链。机器负责发现矛盾，审核员掌握最终判断。</p></div>
+    </div>
+  </div>
+  <div class="cand-card" style="max-width:340px;"><div class="label">14 · 棋盘盾</div>
+    <div class="mock-login-wrap">
+      <div class="mock-login-row">
+        <svg width="33" height="33" viewBox="0 0 48 48" fill="none">
+          <rect x="6" y="4" width="36" height="40" rx="7" stroke="#fff" stroke-width="2.2" fill="none"/>
+          <rect x="10" y="8" width="14" height="14" rx="1" fill="rgba(255,255,255,.1)"/>
+          <rect x="28" y="26" width="14" height="14" rx="1" fill="rgba(255,255,255,.1)"/>
+          <rect x="10" y="26" width="14" height="14" rx="1" fill="var(--evidence)" opacity=".25"/>
+          <rect x="28" y="8" width="14" height="14" rx="1" fill="var(--evidence)" opacity=".25"/>
+          <path d="M19.5 33.5 l2.5 2.5 6.5-8" stroke="var(--evidence)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="brand-txt"><strong>EMC 报告审核系统</strong><small>REPORT REVIEW</small></div>
+      </div>
+      <div class="mock-login-hero"><span>QUALITY / TRACEABILITY / DECISION</span><h1>每一个结论，<br>都回到原文。</h1><p>在四份资料之间建立可追溯证据链。机器负责发现矛盾，审核员掌握最终判断。</p></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

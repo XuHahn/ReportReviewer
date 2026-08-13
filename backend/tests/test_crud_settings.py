@@ -57,3 +57,14 @@ class TestSettingsUpdate:
             "SELECT value FROM system_settings WHERE key = ?", ("rate_max_upload",)
         ).fetchone()
         assert db_row["value"] == "42"
+
+    async def test_rejects_unknown_invalid_and_insecure_settings(self, admin_client):
+        assert (await admin_client.put(
+            "/api/admin/settings", json={"settings": {"unknown": "1"}},
+        )).status_code == 422
+        assert (await admin_client.put(
+            "/api/admin/settings", json={"settings": {"rate_window_sec": "0"}},
+        )).status_code == 422
+        assert (await admin_client.put(
+            "/api/admin/settings", json={"settings": {"deepseek_base_url": "http://example.com"}},
+        )).status_code == 422

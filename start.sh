@@ -1,205 +1,129 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BACKEND_PORT=8000
-FRONTEND_PORT=5173
-ADMIN_PORT=5174
+CONDA_ENV_NAME="${REPORT_REVIEWER_CONDA_ENV:-report-reviewer}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+FRONTEND_V2_PORT="${FRONTEND_V2_PORT:-5174}"
+VISION_READY_TIMEOUT_SEC="${VISION_READY_TIMEOUT_SEC:-600}"
 LOG_DIR="$PROJECT_DIR/logs"
 BACKEND_PID=""
 FRONTEND_PID=""
-ADMIN_PID=""
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+FRONTEND_V2_PID=""
+VISION_PID=""
+VISION_MONITOR_PID=""
 
 mkdir -p "$LOG_DIR"
 
 cleanup() {
-    echo -e "\n${BLUE}正在关闭服务...${NC}"
-    [ -n "$BACKEND_PID" ] && kill $BACKEND_PID 2>/dev/null
-    [ -n "$FRONTEND_PID" ] && kill $FRONTEND_PID 2>/dev/null
-    [ -n "$ADMIN_PID" ] && kill $ADMIN_PID 2>/dev/null
-    wait $BACKEND_PID 2>/dev/null || true
-    wait $FRONTEND_PID 2>/dev/null || true
-    wait $ADMIN_PID 2>/dev/null || true
-    echo -e "${GREEN}已关闭所有服务${NC}"
-    exit 0
+  trap - SIGINT SIGTERM EXIT
+  echo "正在关闭服务..."
+  [[ -n "$BACKEND_PID" ]] && kill "$BACKEND_PID" 2>/dev/null || true
+  [[ -n "$FRONTEND_PID" ]] && kill "$FRONTEND_PID" 2>/dev/null || true
+  [[ -n "$FRONTEND_V2_PID" ]] && kill "$FRONTEND_V2_PID" 2>/dev/null || true
+  [[ -n "$VISION_MONITOR_PID" ]] && kill "$VISION_MONITOR_PID" 2>/dev/null || true
+  [[ -n "$VISION_PID" ]] && kill "$VISION_PID" 2>/dev/null || true
+  wait "$BACKEND_PID" 2>/dev/null || true
+  wait "$FRONTEND_PID" 2>/dev/null || true
+  wait "$FRONTEND_V2_PID" 2>/dev/null || true
+  wait "$VISION_MONITOR_PID" 2>/dev/null || true
+  wait "$VISION_PID" 2>/dev/null || true
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# Kill any processes already on our ports
-kill_port() {
-    local pid=$(lsof -ti ":$1" 2>/dev/null)
-    if [ -n "$pid" ]; then
-        echo -e "  ${YELLOW}端口 $1 被占用 (PID:$pid)，正在释放...${NC}"
-        kill $pid 2>/dev/null && sleep 0.5
-    fi
+for command in conda node npm curl; do
+  command -v "$command" >/dev/null || { echo "缺少运行依赖: $command" >&2; exit 1; }
+done
+BACKEND_PYTHON="$(conda run -n "$CONDA_ENV_NAME" python -c 'import sys; print(sys.executable)' 2>/dev/null)" || {
+  echo "未找到 Conda 环境 $CONDA_ENV_NAME，请先运行 ./setup.sh" >&2
+  exit 1
+}
+[[ -f "$PROJECT_DIR/backend/.env" ]] || {
+  echo "未找到 backend/.env，请复制 backend/.env.example 后填写配置" >&2
+  exit 1
 }
 
-# ── Pre-flight checks ────────────────────────────────────────────────
-echo -e "${BLUE}══════════════════════════════════════════${NC}"
-echo -e "${BLUE}  EMC检测报告智能审核系统${NC}"
-echo -e "${BLUE}══════════════════════════════════════════${NC}"
+# Export the same configuration consumed by python-dotenv so optional local
+# model processes and the backend cannot drift onto different ports/models.
+set -a
+# shellcheck disable=SC1091
+source "$PROJECT_DIR/backend/.env"
+set +a
 
-# Check Python
-PYTHON=$(command -v python3 || echo "")
-if [ -z "$PYTHON" ]; then
-    echo -e "${RED}[错误] 未找到 python3，请先安装 Python 3.10+${NC}"
-    exit 1
-fi
-echo -e "  Python: $($PYTHON --version)"
-
-# Check Node
-NODE=$(command -v node || echo "")
-if [ -z "$NODE" ]; then
-    echo -e "${RED}[错误] 未找到 node，请先安装 Node.js 18+${NC}"
-    exit 1
-fi
-echo -e "  Node:   $(node --version)"
-
-# Check .env
-if [ ! -f "$PROJECT_DIR/backend/.env" ]; then
-    echo -e "${RED}[错误] 未找到 backend/.env，请创建并设置 DEEPSEEK_API_KEY${NC}"
-    exit 1
-fi
-echo -e "  .env:   已配置"
-
-# ── Release ports ─────────────────────────────────────────────────────
-kill_port $FRONTEND_PORT
-kill_port $ADMIN_PORT
-kill_port $BACKEND_PORT
-
-# ── Detect local network IP ───────────────────────────────────────────
-get_local_ip() {
-    ipconfig getifaddr en0 2>/dev/null || \
-    ifconfig en0 2>/dev/null | grep 'inet ' | awk '{print $2}' | head -1 || \
-    hostname -I 2>/dev/null | awk '{print $1}' || \
-    echo "unknown"
+release_port() {
+  local occupied
+  occupied="$(lsof -ti ":$1" 2>/dev/null || true)"
+  [[ -z "$occupied" ]] || kill $occupied 2>/dev/null || true
 }
-LOCAL_IP=$(get_local_ip)
+release_port "$BACKEND_PORT"
+release_port "$FRONTEND_PORT"
+release_port "$FRONTEND_V2_PORT"
 
-# ── Backend ───────────────────────────────────────────────────────────
-echo -e "\n${GREEN}[1/3] 启动后端...${NC}"
 cd "$PROJECT_DIR/backend"
-
-if [ ! -d "venv" ]; then
-    echo "  创建虚拟环境..."
-    $PYTHON -m venv venv
-fi
-source venv/bin/activate
-
-if [ ! -f ".deps_installed" ] || [ requirements.txt -nt .deps_installed ]; then
-    echo "  安装依赖..."
-    pip install -q -r requirements.txt && touch .deps_installed
-fi
-
-uvicorn main:app --host 0.0.0.0 --port $BACKEND_PORT \
-    > "$LOG_DIR/access.log" 2>"$LOG_DIR/backend.log" &
+"$BACKEND_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port "$BACKEND_PORT" >"$LOG_DIR/access.log" 2>"$LOG_DIR/backend.log" &
 BACKEND_PID=$!
-echo "  后端 PID:$BACKEND_PID → http://0.0.0.0:$BACKEND_PORT"
 
-# ── Frontend ──────────────────────────────────────────────────────────
-echo -e "\n${GREEN}[2/3] 启动前端...${NC}"
+# The API is the first user-facing process.  It must be healthy even while
+# the optional local vision model is still loading in the background.
+for _ in $(seq 1 60); do
+  curl -sf "http://localhost:$BACKEND_PORT/api/health" >/dev/null && break
+  sleep 0.5
+done
+curl -sf "http://localhost:$BACKEND_PORT/api/health" >/dev/null || {
+  echo "后端启动失败，请检查 $LOG_DIR/backend.log" >&2
+  exit 1
+}
+echo "后端已启动，视觉模型将异步加载。"
+
 cd "$PROJECT_DIR/frontend"
-
-if [ ! -d "node_modules" ]; then
-    echo "  安装依赖..."
-    npm install --silent
-fi
-
-npx vite --host 0.0.0.0 > "$LOG_DIR/frontend.log" 2>&1 &
+[[ -d node_modules ]] || npm install --silent
+npx vite --host 0.0.0.0 --port "$FRONTEND_PORT" >"$LOG_DIR/frontend.log" 2>&1 &
 FRONTEND_PID=$!
-echo "  前端 PID:$FRONTEND_PID → http://0.0.0.0:$FRONTEND_PORT"
 
-# ── Admin Frontend ───────────────────────────────────────────────────────
-echo -e "\n${GREEN}[3/3] 启动后台管理...${NC}"
-cd "$PROJECT_DIR/admin"
+cd "$PROJECT_DIR/frontend-v2"
+[[ -d node_modules ]] || npm install --silent
+npx vite --host 0.0.0.0 --port "$FRONTEND_V2_PORT" >"$LOG_DIR/frontend-v2.log" 2>&1 &
+FRONTEND_V2_PID=$!
 
-if [ ! -d "node_modules" ]; then
-    echo "  安装依赖..."
-    npm install --silent
+START_VISION="$(awk -F= '$1 == "UNIFIED_REVIEW_START_LOCAL_VISION" {print tolower($2)}' "$PROJECT_DIR/backend/.env" | tail -1 | tr -d '[:space:]')"
+if [[ "$START_VISION" == "true" ]]; then
+  # A previous launcher may have exited without owning its model child. If
+  # the old listener is not released, the new model can load successfully,
+  # fail to bind, and the UI may read a stale readiness response.
+  release_port "${UNIFIED_REVIEW_VISION_PORT:-8081}"
+  "$PROJECT_DIR/scripts/model_runtime/start_qwen_vision.sh" >"$LOG_DIR/qwen-vision.log" 2>&1 &
+  VISION_PID=$!
+  VISION_MODELS_URL="${UNIFIED_REVIEW_VISION_BASE_URL%/}/models"
+  echo "视觉模型已在后台启动（PID:$VISION_PID），页面会显示‘视觉模型准备中’并自动更新。"
+
+  # Readiness is observability only; it must never block or tear down the API.
+  # The health endpoint and frontend poll the same model endpoint for live UI
+  # state, while this watcher leaves a concise launcher milestone in the log.
+  (
+    for _ in $(seq 1 "$VISION_READY_TIMEOUT_SEC"); do
+      if curl -sf --max-time 2 "$VISION_MODELS_URL" >/dev/null; then
+        echo "$(date '+%Y-%m-%dT%H:%M:%S%z') launcher readiness: ready" >>"$LOG_DIR/qwen-vision.log"
+        exit 0
+      fi
+      if ! kill -0 "$VISION_PID" 2>/dev/null; then
+        echo "$(date '+%Y-%m-%dT%H:%M:%S%z') launcher readiness: process exited; API remains available" >>"$LOG_DIR/qwen-vision.log"
+        exit 0
+      fi
+      sleep 1
+    done
+    echo "$(date '+%Y-%m-%dT%H:%M:%S%z') launcher readiness: timeout after ${VISION_READY_TIMEOUT_SEC}s; API remains available" >>"$LOG_DIR/qwen-vision.log"
+  ) &
+  VISION_MONITOR_PID=$!
+else
+  echo "未启用本地视觉模型，页面会根据后端配置显示视觉服务状态。"
 fi
 
-npx vite --host 0.0.0.0 > "$LOG_DIR/admin.log" 2>&1 &
-ADMIN_PID=$!
-echo "  后台管理 PID:$ADMIN_PID → http://0.0.0.0:$ADMIN_PORT"
-
-# ── Health check ──────────────────────────────────────────────────────
-echo -e "\n${BLUE}等待服务就绪...${NC}"
-for i in $(seq 1 20); do
-    sleep 0.5
-    if curl -sf "http://localhost:$BACKEND_PORT/api/health" > /dev/null 2>&1; then
-        echo -e "  ${GREEN}后端就绪 ✓${NC}"
-        break
-    fi
-    if [ $i -eq 20 ]; then
-        echo -e "  ${RED}后端启动超时，请检查日志: $LOG_DIR/backend.log${NC}"
-        exit 1
-    fi
-done
-
-for i in $(seq 1 10); do
-    sleep 0.5
-    if curl -sf "http://localhost:$FRONTEND_PORT" > /dev/null 2>&1; then
-        echo -e "  ${GREEN}前端就绪 ✓${NC}"
-        break
-    fi
-    if [ $i -eq 10 ]; then
-        echo -e "  ${YELLOW}前端启动中 (未能在5s内响应)，请稍后刷新浏览器${NC}"
-    fi
-done
-
-for i in $(seq 1 10); do
-    sleep 0.5
-    if curl -sf "http://localhost:$ADMIN_PORT" > /dev/null 2>&1; then
-        echo -e "  ${GREEN}后台管理就绪 ✓${NC}"
-        break
-    fi
-    if [ $i -eq 10 ]; then
-        echo -e "  ${YELLOW}后台管理启动中 (未能在5s内响应)，请稍后刷新浏览器${NC}"
-    fi
-done
-
-# ── Check processes survived ──────────────────────────────────────────
-if ! kill -0 $BACKEND_PID 2>/dev/null; then
-    echo -e "${RED}[错误] 后端进程已退出，查看日志:${NC}"
-    echo -e "${RED}  $(tail -5 "$LOG_DIR/backend.log")${NC}"
-    exit 1
-fi
-if ! kill -0 $FRONTEND_PID 2>/dev/null; then
-    echo -e "${RED}[错误] 前端进程已退出，查看日志: $LOG_DIR/frontend.log${NC}"
-    exit 1
-fi
-if ! kill -0 $ADMIN_PID 2>/dev/null; then
-    echo -e "${RED}[错误] 后台管理进程已退出，查看日志: $LOG_DIR/admin.log${NC}"
-    exit 1
-fi
-
-# ── Summary ───────────────────────────────────────────────────────────
-echo -e "\n${GREEN}══════════════════════════════════════════${NC}"
-echo -e "${GREEN}  本机访问:${NC}"
-echo -e "${GREEN}    前端 (审核): http://localhost:$FRONTEND_PORT${NC}"
-echo -e "${GREEN}    后台管理:    http://localhost:$ADMIN_PORT${NC}"
-echo -e "${GREEN}    后端:        http://localhost:$BACKEND_PORT${NC}"
-echo -e "${GREEN}    API文档:     http://localhost:$BACKEND_PORT/docs${NC}"
-if [ "$LOCAL_IP" != "unknown" ] && [ -n "$LOCAL_IP" ]; then
-    echo -e "\n${YELLOW}  局域网访问:${NC}"
-    echo -e "${YELLOW}    前端 (审核): http://$LOCAL_IP:$FRONTEND_PORT${NC}"
-    echo -e "${YELLOW}    后台管理:    http://$LOCAL_IP:$ADMIN_PORT${NC}"
-    echo -e "${YELLOW}    后端:        http://$LOCAL_IP:$BACKEND_PORT${NC}"
-fi
-echo -e "\n${BLUE}  日志文件:${NC}"
-echo -e "${BLUE}    审核日志:   $LOG_DIR/app.log${NC}"
-echo -e "${BLUE}    HTTP访问:   $LOG_DIR/access.log${NC}"
-echo -e "${BLUE}    后端输出:   $LOG_DIR/backend.log${NC}"
-echo -e "${BLUE}    前端输出:   $LOG_DIR/frontend.log${NC}"
-echo -e "${BLUE}    后台管理输出: $LOG_DIR/admin.log${NC}"
-echo -e "${YELLOW}  审计日志: http://localhost:$BACKEND_PORT/api/logs${NC}"
-echo -e "${GREEN}  Ctrl+C 关闭所有服务${NC}"
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
-
+echo "统一审核系统已启动"
+echo "前端(v1): http://localhost:$FRONTEND_PORT"
+echo "前端(v2): http://localhost:$FRONTEND_V2_PORT"
+echo "后端:    http://localhost:$BACKEND_PORT"
+echo "API:  http://localhost:$BACKEND_PORT/docs"
+echo "日志: $LOG_DIR"
+echo "Ctrl+C 关闭"
 wait

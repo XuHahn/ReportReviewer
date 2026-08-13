@@ -1,5 +1,6 @@
 """In-memory rate limiting for FastAPI endpoints."""
 
+import asyncio
 import time
 import threading
 from collections import defaultdict
@@ -64,3 +65,19 @@ def check(ip: str, max_req: int) -> bool:
             return False
         _store[ip].append(now)
         return True
+
+
+async def check_async(ip: str, max_req: int) -> bool:
+    """Run the synchronous, cross-thread-safe limiter away from the event loop.
+
+    ``check`` reads live settings from SQLite before entering its very short
+    in-memory critical section.  Keeping the threading lock is intentional:
+    the store can be shared by request threads, while the async wrapper avoids
+    blocking FastAPI's event loop on that settings read.
+    """
+    return await asyncio.to_thread(check, ip, max_req)
+
+
+async def check_upload_async(ip: str) -> bool:
+    """Apply the live upload limit without doing any SQLite work on the event loop."""
+    return await asyncio.to_thread(lambda: check(ip, get_max_upload()))

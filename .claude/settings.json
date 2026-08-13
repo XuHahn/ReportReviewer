@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "everything-claude-code@everything-claude-code": true
+    "everything-claude-code@everything-claude-code": true,
+    "chrome-devtools-mcp@claude-plugins-official": true
   }
 }

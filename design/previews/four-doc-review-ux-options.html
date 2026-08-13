@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>基于原 UI 的四文件核查预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #eef2f7;
+      color: #344054;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+    }
+    button { font: inherit; }
+    .overlay {
+      min-height: 100vh;
+      padding: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, .28);
+    }
+    .modal {
+      width: 96vw;
+      max-width: 1440px;
+      height: 94vh;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 22px 70px rgba(15, 23, 42, .24);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .header {
+      min-height: 58px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #e9ecef;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .title { font-weight: 800; font-size: 17px; color: #1f2937; }
+    .method {
+      font-size: 12px;
+      color: #98a2b3;
+      padding: 3px 8px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+    .filename {
+      margin-left: auto;
+      color: #98a2b3;
+      font-size: 12px;
+      max-width: 360px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .close {
+      width: 32px;
+      height: 32px;
+      border: 0;
+      background: transparent;
+      color: #667085;
+      cursor: pointer;
+      border-radius: 6px;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .stats {
+      min-height: 46px;
+      padding: 8px 18px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      background: #fafbfc;
+      border-bottom: 1px solid #e9ecef;
+      flex-shrink: 0;
+      color: #667085;
+      font-size: 13px;
+    }
+    .stats b { font-size: 15px; color: #344054; }
+    .doc-switch {
+      margin-left: auto;
+      display: flex;
+      gap: 6px;
+      padding: 4px;
+      background: #f0f2f5;
+      border-radius: 7px;
+    }
+    .doc-switch button {
+      height: 30px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 5px;
+      color: #6c757d;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 750;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .doc-switch button.active {
+      background: #fff;
+      color: #344054;
+      box-shadow: 0 1px 2px rgba(0,0,0,.06);
+    }
+    .body {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 410px minmax(0, 1fr);
+    }
+    .left {
+      overflow: auto;
+      border-right: 1px solid #e9ecef;
+      background: #fff;
+    }
+    .right {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+    .panel { display: none; }
+    .panel.active { display: contents; }
+    .section-block { margin-bottom: 2px; }
+    .section-head {
+      padding: 8px 14px;
+      border-bottom: 1px solid #f0f2f5;
+      border-left: 3px solid #4c6ef5;
+      background: rgba(76,110,245,.03);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #6c757d;
+    }
+    .section-head.green { border-left-color: #2b8a3e; background: rgba(43,138,62,.03); }
+    .section-head.orange { border-left-color: #e67700; background: rgba(230,119,0,.03); }
+    .section-head.red { border-left-color: #e03131; background: rgba(224,49,49,.03); }
+    .section-pill {
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-size: 11px;
+      background: #e7f5ff;
+      color: #4c6ef5;
+      font-weight: 800;
+    }
+    .section-head.green .section-pill { background: #d3f9d8; color: #2b8a3e; }
+    .section-head.orange .section-pill { background: #fff3bf; color: #e67700; }
+    .section-head.red .section-pill { background: #ffe3e3; color: #e03131; }
+    .section-count { margin-left: auto; font-weight: 500; font-size: 11px; color: #98a2b3; }
+    .row {
+      min-height: 43px;
+      padding: 7px 14px;
+      border-bottom: 1px solid #f8f9fa;
+      border-left: 3px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .row.active { background: rgba(76,110,245,.05); border-left-color: #4c6ef5; }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #2f9e44;
+      flex-shrink: 0;
+    }
+    .dot.warn { background: #e67700; }
+    .dot.err { background: #e03131; }
+    .row-label {
+      min-width: 82px;
+      max-width: 110px;
+      color: #495057;
+      font-weight: 750;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .row-value {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      color: #344054;
+    }
+    .row-status {
+      flex-shrink: 0;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 750;
+      background: #d3f9d8;
+      color: #2b8a3e;
+    }
+    .row-status.warn { background: #fff3bf; color: #e67700; }
+    .row-status.err { background: #ffe3e3; color: #e03131; }
+    .right-head {
+      min-height: 52px;
+      padding: 0 18px;
+      border-bottom: 1px solid #e9ecef;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .field-title { font-weight: 800; font-size: 14px; color: #344054; }
+    .field-section {
+      padding: 2px 7px;
+      border-radius: 3px;
+      background: #e7f5ff;
+      color: #4c6ef5;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .view-toggle {
+      margin-left: auto;
+      padding: 3px;
+      background: #f1f3f5;
+      border-radius: 6px;
+      display: flex;
+      gap: 2px;
+    }
+    .view-toggle button {
+      border: 0;
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 4px;
+      background: transparent;
+      color: #6c757d;
+      cursor: pointer;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .view-toggle button.active { background: #fff; color: #344054; box-shadow: 0 1px 2px rgba(0,0,0,.06); font-weight: 750; }
+    .right-content { flex: 1; overflow: auto; padding: 16px 18px; }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .detail-card {
+      border: 1px solid #e9ecef;
+      border-radius: 7px;
+      background: #fff;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .detail-card-head {
+      padding: 8px 12px;
+      background: #fafbfc;
+      border-bottom: 1px solid #e9ecef;
+      font-size: 12px;
+      font-weight: 800;
+      color: #495057;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .kv { padding: 12px; display: grid; gap: 10px; }
+    .kv-row { display: grid; grid-template-columns: 92px minmax(0,1fr); gap: 10px; }
+    .kv-label { color: #98a2b3; font-size: 12px; }
+    .kv-value { color: #344054; font-weight: 700; line-height: 1.5; word-break: break-word; }
+    .confidence {
+      height: 7px;
+      border-radius: 4px;
+      background: #f0f2f5;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .confidence div { height: 100%; background: #2f9e44; border-radius: 4px; }
+    .quote {
+      padding: 11px 13px;
+      line-height: 1.65;
+      color: #495057;
+      font-size: 12px;
+    }
+    mark { background: #fff3bf; padding: 0 2px; border-radius: 2px; color: inherit; }
+    .table-wrap {
+      border: 1px solid #e9ecef;
+      border-radius: 7px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #f0f2f5; text-align: left; vertical-align: top; line-height: 1.45; }
+    th { background: #fafbfc; color: #6c757d; font-weight: 800; }
+    tr:last-child td { border-bottom: 0; }
+    .source-doc {
+      border: 1px solid #e9ecef;
+      border-radius: 7px;
+      overflow: hidden;
+      background: #fff;
+      margin-bottom: 10px;
+    }
+    .source-head {
+      padding: 8px 12px;
+      background: #fafbfc;
+      border-bottom: 1px solid #e9ecef;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #6c757d;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .sheet {
+      overflow: auto;
+      max-height: 270px;
+    }
+    .sheet table { min-width: 780px; }
+    .sheet th, .sheet td { border: 1px solid #e0dbd0; }
+    .hl { background: #fff9db; box-shadow: inset 0 0 0 2px #f08c00; font-weight: 800; }
+    .footer {
+      min-height: 54px;
+      padding: 10px 18px;
+      border-top: 1px solid #e9ecef;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .footer-note { color: #98a2b3; font-size: 12px; }
+    .footer-actions { margin-left: auto; display: flex; gap: 8px; }
+    .pg-btn {
+      height: 34px;
+      border: 1px solid #d0d5dd;
+      border-radius: 6px;
+      background: #fff;
+      color: #344054;
+      padding: 0 14px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    .pg-btn.primary { background: #4c6ef5; border-color: #4c6ef5; color: #fff; }
+    .doc-panel { display: none; }
+    .doc-panel.active { display: contents; }
+    .source-view { display: none; }
+    .source-view.active { display: block; }
+    @media (max-width: 1000px) {
+      .modal { height: 98vh; width: 98vw; }
+      .body { grid-template-columns: 1fr; }
+      .left { max-height: 38vh; border-right: 0; border-bottom: 1px solid #e9ecef; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .doc-switch { width: 100%; overflow: auto; margin-left: 0; }
+      .stats { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <div class="modal">
+      <div class="header">
+        <div class="title">核查提取结果</div>
+        <div class="method" id="method-text">代码提取 · 100% 确定性</div>
+        <div class="filename" id="filename-text">EMC测试申请表E20260601（塔）.xls</div>
+        <button class="close">×</button>
+      </div>
+      <div class="stats">
+        <span><b id="field-total">42</b> 字段</span>
+        <span style="color:#2f9e44"><b id="confirmed-total">38</b> 已确认</span>
+        <span style="color:#e67700"><b id="pending-total">4</b> 待确认</span>
+        <span style="color:#98a2b3">已修改 0 处</span>
+        <div class="doc-switch">
+          <button class="active" data-doc="order">委托单</button>
+          <button data-doc="plan">试验计划</button>
+          <button data-doc="raw">原始记录</button>
+          <button data-doc="report">检测报告</button>
+        </div>
+      </div>
+
+      <div class="body">
+        <section id="order-left" class="doc-panel active">
+          <div class="left">
+            <div class="section-block">
+              <div class="section-head"><span class="section-pill">申请方</span> 3 字段 <span class="section-count">3/3 确认</span></div>
+              <div class="row active" data-title="委托单位" data-section="申请方" data-doc="order" data-mode="detail">
+                <span class="dot"></span><span class="row-label">委托单位</span><span class="row-value">广州某汽车电子有限公司</span><span class="row-status">已确认</span>
+              </div>
+              <div class="row" data-title="委托编号" data-section="申请方" data-doc="order">
+                <span class="dot"></span><span class="row-label">委托编号</span><span class="row-value">E202605287495</span><span class="row-status">已确认</span>
+              </div>
+            </div>
+            <div class="section-block">
+              <div class="section-head green"><span class="section-pill">样品信息</span> 5 字段 <span class="section-count">4/5 确认</span></div>
+              <div class="row" data-title="样品名称" data-section="样品信息" data-doc="order"><span class="dot"></span><span class="row-label">样品名称</span><span class="row-value">雾灯</span><span class="row-status">已确认</span></div>
+              <div class="row" data-title="样品型号" data-section="样品信息" data-doc="order"><span class="dot warn"></span><span class="row-label">样品型号</span><span class="row-value">703F</span><span class="row-status warn">待确认</span></div>
+              <div class="row" data-title="供电电压" data-section="样品信息" data-doc="order"><span class="dot"></span><span class="row-label">供电电压</span><span class="row-value">DC14.0V</span><span class="row-status">已确认</span></div>
+            </div>
+            <div class="section-block">
+              <div class="section-head orange"><span class="section-pill">测试要求</span> 6 字段 <span class="section-count">5/6 确认</span></div>
+              <div class="row" data-title="测试项目范围" data-section="测试要求" data-doc="order"><span class="dot warn"></span><span class="row-label">测试项目</span><span class="row-value">瞬态抗扰度；系统12V电源电压波动</span><span class="row-status warn">待确认</span></div>
+              <div class="row" data-title="标准依据" data-section="测试要求" data-doc="order"><span class="dot"></span><span class="row-label">标准依据</span><span class="row-value">客户测试大纲 / ISO 7637-2</span><span class="row-status">已确认</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="plan-left" class="doc-panel">
+          <div class="left">
+            <div class="section-block">
+              <div class="section-head"><span class="section-pill">计划概要</span> 4 字段 <span class="section-count">3/4 确认</span></div>
+              <div class="row active" data-title="计划名称" data-section="计划概要" data-doc="plan"><span class="dot"></span><span class="row-label">计划名称</span><span class="row-value">大冶-灯具准入实验标准（新）</span><span class="row-status">已确认</span></div>
+              <div class="row" data-title="项目类别" data-section="计划概要" data-doc="plan"><span class="dot warn"></span><span class="row-label">项目类别</span><span class="row-value">灯类 / A1</span><span class="row-status warn">待确认</span></div>
+            </div>
+            <div class="section-block">
+              <div class="section-head green"><span class="section-pill">执行项集合</span> 2 项 <span class="section-count">2/2 匹配</span></div>
+              <div class="row" data-title="瞬态抗扰度试验" data-section="执行项集合" data-doc="plan"><span class="dot"></span><span class="row-label">试验项 1</span><span class="row-value">瞬态抗扰度试验</span><span class="row-status">已匹配</span></div>
+              <div class="row" data-title="系统12V电源电压波动试验" data-section="执行项集合" data-doc="plan"><span class="dot"></span><span class="row-label">试验项 2</span><span class="row-value">系统12V电源电压波动试验</span><span class="row-status">已匹配</span></div>
+            </div>
+            <div class="section-block">
+              <div class="section-head orange"><span class="section-pill">验收与条件</span> 6 字段 <span class="section-count">4/6 确认</span></div>
+              <div class="row" data-title="接受标准" data-section="验收与条件" data-doc="plan"><span class="dot"></span><span class="row-label">接受标准</span><span class="row-value">必做 / 符合</span><span class="row-status">已确认</span></div>
+              <div class="row" data-title="工作模式" data-section="验收与条件" data-doc="plan"><span class="dot warn"></span><span class="row-label">工作模式</span><span class="row-value">模式1</span><span class="row-status warn">待确认</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="raw-left" class="doc-panel">
+          <div class="left">
+            <div class="section-block">
+              <div class="section-head green"><span class="section-pill">实验模块</span> 2 PDF <span class="section-count">2/2 确认</span></div>
+              <div class="row active" data-title="瞬态抗扰度试验" data-section="实验模块" data-doc="raw"><span class="dot"></span><span class="row-label">实验 1</span><span class="row-value">瞬态抗扰度试验 · PDF 1</span><span class="row-status">符合</span></div>
+              <div class="row" data-title="系统12V电源电压波动试验" data-section="实验模块" data-doc="raw"><span class="dot"></span><span class="row-label">实验 2</span><span class="row-value">系统12V电源电压波动 · PDF 2</span><span class="row-status">符合</span></div>
+            </div>
+            <div class="section-block">
+              <div class="section-head orange"><span class="section-pill">试验子项</span> 5 子项 <span class="section-count">5/5 提取</span></div>
+              <div class="row" data-title="脉冲 1 / 2a / 2b / 3a" data-section="试验子项" data-doc="raw"><span class="dot"></span><span class="row-label">瞬态子项</span><span class="row-value">脉冲 1、2a、2b、3a</span><span class="row-status">已确认</span></div>
+              <div class="row" data-title="12V电源电压波动子项" data-section="试验子项" data-doc="raw"><span class="dot"></span><span class="row-label">12V 子项</span><span class="row-value">Uʙ=12V; Us=-7V</span><span class="row-status">已确认</span></div>
+            </div>
+            <div class="section-block">
+              <div class="section-head"><span class="section-pill">仪器清单</span> 8 条 <span class="section-count">7 台去重</span></div>
+              <div class="row" data-title="仪器清单" data-section="仪器清单" data-doc="raw"><span class="dot warn"></span><span class="row-label">仪器</span><span class="row-value">8 条原始 / 7 台去重</span><span class="row-status warn">待确认</span></div>
+              <div class="row" data-title="校准有效期" data-section="仪器清单" data-doc="raw"><span class="dot"></span><span class="row-label">校准</span><span class="row-value">最早 2026-12-15</span><span class="row-status">通过</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="report-left" class="doc-panel">
+          <div class="left">
+            <div class="section-block">
+              <div class="section-head"><span class="section-pill">封面信息</span> 8 字段 <span class="section-count">8/8 确认</span></div>
+              <div class="row active" data-title="报告编号" data-section="封面信息" data-doc="report"><span class="dot"></span><span class="row-label">报告编号</span><span class="row-value">E202605287495-V1</span><span class="row-status">已确认</span></div>
+              <div class="row" data-title="样品名称/型号" data-section="封面信息" data-doc="report"><span class="dot"></span><span class="row-label">样品型号</span><span class="row-value">雾灯 / 703F</span><span class="row-status">已确认</span></div>
+            </div>
+            <div class="section-block">
+              <div class="section-head green"><span class="section-pill">报告章节</span> 2 模块 <span class="section-count">2/2 匹配</span></div>
+              <div class="row" data-title="17.4 瞬态抗扰度试验" data-section="报告章节" data-doc="report"><span class="dot"></span><span class="row-label">17.4</span><span class="row-value">瞬态抗扰度试验</span><span class="row-status">已匹配</span></div>
+              <div class="row" data-title="17.5 系统12V电源电压波动试验" data-section="报告章节" data-doc="report"><span class="dot"></span><span class="row-label">17.5</span><span class="row-value">系统12V电源电压波动</span><span class="row-status">已匹配</span></div>
+            </div>
+            <div class="section-block">
+              <div class="section-head orange"><span class="section-pill">结果/仪器</span> 10 字段 <span class="section-count">9/10 确认</span></div>
+              <div class="row" data-title="测试结果" data-section="结果/仪器" data-doc="report"><span class="dot"></span><span class="row-label">结果</span><span class="row-value">全部符合</span><span class="row-status">已确认</span></div>
+              <div class="row" data-title="报告仪器清单" data-section="结果/仪器" data-doc="report"><span class="dot warn"></span><span class="row-label">仪器</span><span class="row-value">8 条 / 7 去重</span><span class="row-status warn">待确认</span></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="right">
+          <div class="right-head">
+            <span class="field-title" id="detail-title">委托单位</span>
+            <span class="field-section" id="detail-section">申请方</span>
+            <div class="view-toggle">
+              <button class="active" data-view="detail">字段详情</button>
+              <button data-view="source">原文出处</button>
+            </div>
+          </div>
+          <div class="right-content">
+            <div id="detail-view" class="source-view active">
+              <div class="detail-grid">
+                <div>
+                  <div class="detail-card">
+                    <div class="detail-card-head">字段值 <span id="value-method">确定性提取</span></div>
+                    <div class="kv">
+                      <div class="kv-row"><div class="kv-label">当前值</div><div class="kv-value" id="current-value">广州某汽车电子有限公司</div></div>
+                      <div class="kv-row"><div class="kv-label">建议动作</div><div class="kv-value" id="suggest-action">与报告封面、原始记录委托编号联动确认。</div></div>
+                    </div>
+                  </div>
+                  <div class="detail-card">
+                    <div class="detail-card-head">置信度</div>
+                    <div class="kv">
+                      <div class="kv-row"><div class="kv-label">评分</div><div class="kv-value" id="confidence-text">1.00 高置信</div></div>
+                      <div class="confidence"><div id="confidence-bar" style="width:100%"></div></div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div class="detail-card">
+                    <div class="detail-card-head">跨文件关系</div>
+                    <div class="kv" id="relation-box">
+                      <div class="kv-row"><div class="kv-label">报告封面</div><div class="kv-value">一致</div></div>
+                      <div class="kv-row"><div class="kv-label">原始记录</div><div class="kv-value">委托编号一致</div></div>
+                      <div class="kv-row"><div class="kv-label">试验计划</div><div class="kv-value">仅作参考</div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="table-wrap" id="module-table"></div>
+            </div>
+
+            <div id="source-view" class="source-view">
+              <div id="source-content"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <span class="footer-note">基于原核查弹窗：左侧字段/模块列表 · 右侧字段详情/原文出处 · 底部确认动作</span>
+        <div class="footer-actions">
+          <button class="pg-btn">关闭</button>
+          <button class="pg-btn">仅保存</button>
+          <button class="pg-btn primary">确认核查</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const docMeta = {
+      order: { method: '代码提取 · 100% 确定性', filename: 'EMC测试申请表E20260601（塔）.xls', total: 42, confirmed: 38, pending: 4 },
+      plan: { method: 'AI 提取 · 厂商计划表', filename: '大冶-灯具准入实验标准（新.xlsx', total: 18, confirmed: 14, pending: 4 },
+      raw: { method: '代码提取 · 2 份 PDF', filename: 'E202605287495原始记录.zip', total: 31, confirmed: 27, pending: 4 },
+      report: { method: 'AI 提取 · 报告基准', filename: '报告书_E202605287495-V1.docx', total: 46, confirmed: 42, pending: 4 },
+    };
+
+    const detailData = {
+      order: {
+        value: '广州某汽车电子有限公司',
+        action: '与报告封面、委托编号、样品型号联动确认。',
+        relation: [['报告封面', '委托单位一致'], ['原始记录', '委托编号 E202605287495'], ['试验计划', '计划项目仅参考']],
+        table: '<table><thead><tr><th>字段</th><th>委托单</th><th>报告封面</th><th>状态</th></tr></thead><tbody><tr><td>样品名称</td><td>雾灯</td><td>雾灯</td><td>一致</td></tr><tr><td>型号</td><td>703F</td><td>703F</td><td>一致</td></tr><tr><td>供电</td><td>DC14.0V</td><td>DC14.0V</td><td>一致</td></tr></tbody></table>',
+        source: '<div class="source-doc"><div class="source-head"><span>Excel 单元格定位</span><span>确定性</span></div><div class="sheet"><table><thead><tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th></tr></thead><tbody><tr><th>16</th><td>产品名称</td><td class="hl">雾灯</td><td>型号</td><td class="hl">703F</td><td>数量</td><td>1</td></tr><tr><th>17</th><td>供电电压</td><td class="hl">DC14.0V</td><td>委托编号</td><td class="hl">E202605287495</td><td></td><td></td></tr><tr><th>18</th><td>测试项目</td><td colspan="5">瞬态抗扰度试验；系统12V电源电压波动试验</td></tr></tbody></table></div></div>'
+      },
+      plan: {
+        value: '瞬态抗扰度试验；系统12V电源电压波动试验',
+        action: '确认 LLM 是否完整提取厂商计划表中的全部执行项。',
+        relation: [['报告测试项', '2 项均找到'], ['原始记录', '2 份 PDF 对应'], ['委托单', '测试范围一致']],
+        table: '<table><thead><tr><th>序号</th><th>试验项目</th><th>接受标准</th><th>报告/记录匹配</th></tr></thead><tbody><tr><td>1</td><td>瞬态抗扰度试验</td><td>必做</td><td>已匹配</td></tr><tr><td>2</td><td>系统12V电源电压波动试验</td><td>必做</td><td>已匹配</td></tr></tbody></table>',
+        source: '<div class="source-doc"><div class="source-head"><span>试验计划表行</span><span>AI 提取</span></div><div class="quote">验证计划 / 序号 / <mark>试验项目</mark> / 试验描述 / 接受标准 / 样件 / 工作模式。没有 EQ 编号时保留厂商原始项目名称。</div></div><div class="source-doc"><div class="source-head"><span>提取质量</span><span>可审核</span></div><div class="quote">基础信息字段较少，但已提取到执行项集合，因此不阻断后续审核。</div></div>'
+      },
+      raw: {
+        value: '2 个实验模块；8 条仪器原始记录；7 台去重设备',
+        action: '按实验模块确认每份 PDF 的测试条件、子项、结论和仪器。',
+        relation: [['试验计划', '2 项均覆盖'], ['检测报告', '17.4 / 17.5 对应'], ['仪器', '8 原始 / 7 去重']],
+        table: '<table><thead><tr><th>实验</th><th>子项</th><th>结果</th><th>仪器</th></tr></thead><tbody><tr><td>瞬态抗扰度</td><td>脉冲 1/2a/2b/3a</td><td>符合</td><td>4 台</td></tr><tr><td>系统12V电源波动</td><td>Uʙ=12V; Us=-7V</td><td>符合</td><td>4 台</td></tr></tbody></table>',
+        source: '<div class="source-doc"><div class="source-head"><span>PDF 1 · 仪器表</span><span>4 台</span></div><div class="quote"><mark>抛负载模拟器</mark>、Tektronix MDO3102、3ctest APS 40C30/DCP40C30、3ctest TIS700-60。</div></div><div class="source-doc"><div class="source-head"><span>PDF 2 · 仪器表</span><span>4 台</span></div><div class="quote">EMTEST UCS200-M、EMTEST VDS200、EMTEST LD200、<mark>Tektronix MDO3102</mark>。示波器与 PDF 1 共用，去重后少 1 台。</div></div>'
+      },
+      report: {
+        value: '报告封面 + 17.4 / 17.5 两个报告模块',
+        action: '检测报告作为审核基准，确认每个报告测试项都有计划和原始记录对应。',
+        relation: [['委托单', '封面字段一致'], ['试验计划', '测试项全集一致'], ['原始记录', '2 个模块均对应']],
+        table: '<table><thead><tr><th>报告章节</th><th>测试项目</th><th>原始记录</th><th>结论</th></tr></thead><tbody><tr><td>17.4</td><td>瞬态抗扰度试验</td><td>PDF 1</td><td>符合</td></tr><tr><td>17.5</td><td>系统12V电源电压波动试验</td><td>PDF 2</td><td>符合</td></tr></tbody></table>',
+        source: '<div class="source-doc"><div class="source-head"><span>报告章节 17.4</span><span>报告基准</span></div><div class="quote">测试项目：<mark>瞬态抗扰度试验</mark>；测试模式：模式1；测试结果：符合。</div></div><div class="source-doc"><div class="source-head"><span>报告章节 17.5</span><span>报告基准</span></div><div class="quote">测试项目：<mark>系统 12V 电源电压波动试验</mark>；测试结果：符合。</div></div>'
+      },
+    };
+
+    let currentDoc = 'order';
+
+    function activateDoc(doc) {
+      currentDoc = doc;
+      document.querySelectorAll('.doc-switch button').forEach(b => b.classList.toggle('active', b.dataset.doc === doc));
+      document.querySelectorAll('.doc-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById(`${doc}-left`).classList.add('active');
+      const m = docMeta[doc];
+      document.getElementById('method-text').textContent = m.method;
+      document.getElementById('filename-text').textContent = m.filename;
+      document.getElementById('field-total').textContent = m.total;
+      document.getElementById('confirmed-total').textContent = m.confirmed;
+      document.getElementById('pending-total').textContent = m.pending;
+      const first = document.querySelector(`#${doc}-left .row`);
+      document.querySelectorAll('.row').forEach(r => r.classList.remove('active'));
+      if (first) first.classList.add('active');
+      updateDetail(first || { dataset: { title: doc, section: '' } });
+    }
+
+    function updateDetail(row) {
+      const doc = row.dataset.doc || currentDoc;
+      const data = detailData[doc];
+      document.getElementById('detail-title').textContent = row.dataset.title || '字段详情';
+      document.getElementById('detail-section').textContent = row.dataset.section || '';
+      document.getElementById('current-value').textContent = data.value;
+      document.getElementById('suggest-action').textContent = data.action;
+      document.getElementById('relation-box').innerHTML = data.relation.map(([k,v]) => `<div class="kv-row"><div class="kv-label">${k}</div><div class="kv-value">${v}</div></div>`).join('');
+      document.getElementById('module-table').innerHTML = data.table;
+      document.getElementById('source-content').innerHTML = data.source;
+      document.getElementById('confidence-text').textContent = doc === 'plan' ? '0.88 中高置信' : doc === 'raw' ? '0.96 高置信' : '1.00 高置信';
+      document.getElementById('confidence-bar').style.width = doc === 'plan' ? '88%' : doc === 'raw' ? '96%' : '100%';
+    }
+
+    document.querySelectorAll('.doc-switch button').forEach(btn => {
+      btn.addEventListener('click', () => activateDoc(btn.dataset.doc));
+    });
+    document.querySelectorAll('.row').forEach(row => {
+      row.addEventListener('click', () => {
+        document.querySelectorAll(`#${currentDoc}-left .row`).forEach(r => r.classList.remove('active'));
+        row.classList.add('active');
+        updateDetail(row);
+      });
+    });
+    document.querySelectorAll('.view-toggle button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('detail-view').classList.toggle('active', btn.dataset.view === 'detail');
+        document.getElementById('source-view').classList.toggle('active', btn.dataset.view === 'source');
+      });
+    });
+
+    activateDoc('order');
+  </script>
+</body>
+</html>
